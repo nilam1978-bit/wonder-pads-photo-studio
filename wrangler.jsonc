@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wonder-pads-photo-studio",
+  "compatibility_date": "2026-07-20",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "wonder-pads-photo-studio-phase1"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
