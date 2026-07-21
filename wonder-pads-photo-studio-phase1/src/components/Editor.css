@@ -1,0 +1,128 @@
+.editor {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.editor-loading {
+  text-align: center;
+  color: #999;
+  margin: 40px 0;
+}
+
+.editor-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-back {
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #5a2e51;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.editor-filename {
+  font-size: 13px;
+  color: #6b6a66;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-modes,
+.editor-ratios,
+.editor-fill-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-modes button,
+.editor-ratios button,
+.editor-fill-options button,
+.editor-save {
+  background: #f4f4f2;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2c2a;
+  cursor: pointer;
+}
+
+.editor-modes button.active,
+.editor-ratios button.active,
+.editor-fill-options button.active {
+  background: #F1CFEA;
+  color: #5a2e51;
+}
+
+.editor-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  background: #f4f4f2;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.editor-canvas {
+  max-width: 100%;
+  border-radius: 6px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.editor-canvas.eyedropper {
+  cursor: crosshair;
+}
+
+.editor-hint {
+  font-size: 12px;
+  color: #999;
+  margin: 0;
+  text-align: center;
+}
+
+.editor-fill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editor-fill-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-fill-options input[type='color'] {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.editor-save {
+  background: #5a2e51;
+  color: #fff;
+  padding: 14px;
+  font-size: 15px;
+  border-radius: 10px;
+  margin-top: 4px;
+}
+
+.editor-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
