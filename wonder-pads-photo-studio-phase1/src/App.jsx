@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
+import Editor from './components/Editor';
 import './App.css';
 
 const STATUS_LABELS = {
@@ -18,9 +19,11 @@ function App() {
     selectAll,
     clearSelection,
     selectedCount,
+    saveEdit,
   } = useLibrary();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleFileInput = useCallback(
@@ -39,6 +42,21 @@ function App() {
     },
     [addFiles]
   );
+
+  const editingImage = images.find((img) => img.id === editingId);
+
+  if (editingImage) {
+    return (
+      <Editor
+        image={editingImage}
+        onClose={() => setEditingId(null)}
+        onSave={(id, editState, newThumbUrl) => {
+          saveEdit(id, editState, newThumbUrl);
+          setEditingId(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -99,10 +117,20 @@ function App() {
             <div
               key={img.id}
               className={`thumb ${img.selected ? 'thumb--selected' : ''}`}
-              onClick={() => toggleSelect(img.id)}
+              onClick={() => setEditingId(img.id)}
             >
               <img src={img.thumbUrl} alt={img.fileName} />
-              <span className="thumb-status">{STATUS_LABELS[img.status]}</span>
+              <button
+                type="button"
+                className={`thumb-check ${img.selected ? 'thumb-check--on' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelect(img.id);
+                }}
+                aria-label={img.selected ? `Deselect ${img.fileName}` : `Select ${img.fileName}`}
+              >
+                {img.selected ? '✓' : ''}
+              </button>
               <button
                 type="button"
                 className="thumb-remove"
@@ -114,7 +142,9 @@ function App() {
               >
                 ×
               </button>
-              <span className="thumb-name">{img.fileName}</span>
+              <span className="thumb-name">
+                {img.fileName} · {STATUS_LABELS[img.status]}
+              </span>
             </div>
           ))}
         </div>
