@@ -96,6 +96,20 @@ export function useLibrary() {
 
   const selectedCount = images.filter((img) => img.selected).length;
 
+  // Used when saving an edit: swaps in a new edit state, a new preview
+  // thumbnail, and marks the photo as edited — all in one update. The old
+  // thumbnail URL is released so memory doesn't creep up over a long
+  // editing session.
+  const saveEdit = useCallback((id, editState, newThumbUrl) => {
+    setImages((prev) =>
+      prev.map((img) => {
+        if (img.id !== id) return img;
+        URL.revokeObjectURL(img.thumbUrl);
+        return { ...img, editState, thumbUrl: newThumbUrl, status: 'edited' };
+      })
+    );
+  }, []);
+
   return {
     images,
     isImporting,
@@ -105,5 +119,6 @@ export function useLibrary() {
     selectAll,
     clearSelection,
     selectedCount,
+    saveEdit,
   };
 }
