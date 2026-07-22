@@ -1,5 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
+import { usePresets } from './hooks/usePresets';
+import { RATIOS, computeCenteredCrop } from './utils/renderEdit';
+import { renderFullEdit, makeThumbFromCanvas } from './utils/exportImage';
 import Editor from './components/Editor';
 import './App.css';
 
@@ -21,9 +24,12 @@ function App() {
     selectedCount,
     saveEdit,
   } = useLibrary();
+  const { presets, addPreset } = usePresets();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [applyingPreset, setApplyingPreset] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleFileInput = useCallback(
@@ -43,15 +49,43 @@ function App() {
     [addFiles]
   );
 
+  // Applies a saved preset's look to every currently-selected photo, one
+  // at a time. Updates each photo's thumbnail and status in the library —
+  // it doesn't trigger a download for each one (that's what the Editor's
+  // single-photo Save button is for); a proper "download the whole batch"
+  // step is planned for a later phase.
+  const handleApplyPreset = async (preset) => {
+    setApplyingPreset(true);
+    const targets = images.filter((img) => img.selected);
+    for (const img of targets) {
+      let editState = {
+        mode: preset.look.mode,
+        ratioKey: preset.look.ratioKey,
+        fitFill: preset.look.fitFill,
+        adjustments: preset.look.adjustments,
+      };
+      if (preset.look.mode === 'crop') {
+        editState.crop = computeCenteredCrop(img.fullWidth, img.fullHeight, RATIOS[preset.look.ratioKey]);
+      }
+      const outCanvas = await renderFullEdit(img.file, editState);
+      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+      saveEdit(img.id, editState, newThumbUrl, 'preset');
+    }
+    setApplyingPreset(false);
+    setShowPresetPicker(false);
+  };
+
   const editingImage = images.find((img) => img.id === editingId);
 
   if (editingImage) {
     return (
       <Editor
         image={editingImage}
+        presets={presets}
+        onAddPreset={addPreset}
         onClose={() => setEditingId(null)}
-        onSave={(id, editState, newThumbUrl) => {
-          saveEdit(id, editState, newThumbUrl);
+        onSave={(id, editState, newThumbUrl, status) => {
+          saveEdit(id, editState, newThumbUrl, status);
           setEditingId(null);
         }}
       />
@@ -102,9 +136,29 @@ function App() {
             <button type="button" onClick={clearSelection} disabled={selectedCount === 0}>
               Clear
             </button>
-            <button type="button" disabled title="Coming in Phase 3">
-              Apply preset
-            </button>
+            <div className="preset-picker-wrap">
+              <button
+                type="button"
+                disabled={selectedCount === 0 || presets.length === 0}
+                title={presets.length === 0 ? 'Save a preset from the Editor first' : ''}
+                onClick={() => setShowPresetPicker((v) => !v)}
+              >
+                Apply preset
+              </button>
+              {showPresetPicker && (
+                <div className="preset-picker">
+                  {applyingPreset ? (
+                    <p className="preset-picker-status">Applying…</p>
+                  ) : (
+                    presets.map((p) => (
+                      <button key={p.id} type="button" onClick={() => handleApplyPreset(p)}>
+                        {p.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
