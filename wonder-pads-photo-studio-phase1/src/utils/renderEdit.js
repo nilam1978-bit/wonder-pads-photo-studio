@@ -24,6 +24,14 @@ export function computeCenteredCrop(imgWidth, imgHeight, ratioValue) {
   return { x: 0, y: (1 - height) / 2, width: 1, height };
 }
 
+// Turns {brightness, contrast, saturation} (each -100..100, 0 = no change)
+// into a canvas filter string. Same units the sliders use, so what you see
+// while dragging is exactly what gets baked into the final export.
+export function filterString(adjustments) {
+  const { brightness = 0, contrast = 0, saturation = 0 } = adjustments || {};
+  return `brightness(${100 + brightness}%) contrast(${100 + contrast}%) saturate(${100 + saturation}%)`;
+}
+
 // Draws whatever the current edit describes onto a canvas context, at
 // whatever output size you ask for. Called with a small size for the live
 // on-screen preview, and again with the full original size for downloads
@@ -43,7 +51,10 @@ export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, 
   const sy = crop.y * srcHeight;
   const sw = crop.width * srcWidth;
   const sh = crop.height * srcHeight;
+  ctx.save();
+  ctx.filter = filterString(editState.adjustments);
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, outWidth, outHeight);
+  ctx.restore();
 }
 
 function drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight) {
@@ -52,6 +63,8 @@ function drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeigh
   if (fill.type === 'blur') {
     // Cover-fill a blurred copy behind everything, so the pad space picks
     // up softened colors from the photo itself instead of a flat color.
+    // Brightness/contrast/saturation intentionally do NOT apply here —
+    // this backdrop is just a soft color cue, not part of the product shot.
     const coverScale = Math.max(outWidth / srcWidth, outHeight / srcHeight);
     const cw = srcWidth * coverScale;
     const ch = srcHeight * coverScale;
@@ -65,9 +78,13 @@ function drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeigh
   }
 
   // The full, untouched photo sits on top, scaled down to fit entirely
-  // inside the frame (nothing cropped away).
+  // inside the frame (nothing cropped away). Adjustments apply here, to
+  // the actual product photo.
   const containScale = Math.min(outWidth / srcWidth, outHeight / srcHeight);
   const dw = srcWidth * containScale;
   const dh = srcHeight * containScale;
+  ctx.save();
+  ctx.filter = filterString(editState?.adjustments);
   ctx.drawImage(source, (outWidth - dw) / 2, (outHeight - dh) / 2, dw, dh);
+  ctx.restore();
 }
