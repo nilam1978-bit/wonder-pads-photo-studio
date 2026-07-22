@@ -100,12 +100,12 @@ export function useLibrary() {
   // thumbnail, and marks the photo as edited — all in one update. The old
   // thumbnail URL is released so memory doesn't creep up over a long
   // editing session.
-  const saveEdit = useCallback((id, editState, newThumbUrl) => {
+  const saveEdit = useCallback((id, editState, newThumbUrl, status = 'edited') => {
     setImages((prev) =>
       prev.map((img) => {
         if (img.id !== id) return img;
         URL.revokeObjectURL(img.thumbUrl);
-        return { ...img, editState, thumbUrl: newThumbUrl, status: 'edited' };
+        return { ...img, editState, thumbUrl: newThumbUrl, status };
       })
     );
   }, []);
