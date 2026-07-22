@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RATIOS, computeCenteredCrop, drawEdit } from '../utils/renderEdit';
+import { RATIOS, computeCenteredCrop, drawEdit, filterString } from '../utils/renderEdit';
 import { loadImageCanvas } from '../utils/loadImageCanvas';
+import { computeAutoEnhance } from '../utils/autoEnhance';
+import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from '../utils/exportImage';
 import './Editor.css';
 
 const CROP_BOX = 380; // fixed square preview box used while in Crop mode
 const MIN_CROP_SIZE = 0.05; // smallest crop rect allowed, as a fraction of the image
 const HANDLE_HIT_RADIUS = 16; // px, generous so it's easy to grab on a phone
+const DEFAULT_ADJUSTMENTS = { brightness: 0, contrast: 0, saturation: 0 };
 
 function ratioButtonsForMode(mode) {
   const all = ['free', '1:1', '4:5', '9:16', '16:9'];
   return mode === 'fit' ? all.filter((k) => k !== 'free') : all;
 }
 
-// Given which corner is being dragged and the opposite (anchor) corner,
-// works out a new aspect-locked rectangle that can't spill outside the
-// image. See the build notes for the per-corner math this follows.
 function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
   let width = Math.max(candidateWidth, MIN_CROP_SIZE);
   let x, y, height;
@@ -34,7 +34,6 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
     x = anchor.x;
     y = anchor.y - height;
   } else {
-    // sw
     width = Math.min(width, anchor.x, (1 - anchor.y) * ratioValue);
     height = width / ratioValue;
     x = anchor.x - width;
@@ -43,32 +42,22 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
   return { x, y, width, height };
 }
 
-function downloadCanvas(canvas, filename) {
-  canvas.toBlob((blob) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, 'image/jpeg', 0.9);
-}
-
-export default function Editor({ image, onClose, onSave }) {
+export default function Editor({ image, onClose, onSave, presets, onAddPreset }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
   const [mode, setMode] = useState(initial.mode || 'crop');
   const [ratioKey, setRatioKey] = useState(initial.ratioKey || 'free');
   const [crop, setCrop] = useState(initial.crop || { x: 0, y: 0, width: 1, height: 1 });
   const [fitFill, setFitFill] = useState(initial.fitFill || { type: 'color', color: '#ffffff' });
+  const [adjustments, setAdjustments] = useState(initial.adjustments || DEFAULT_ADJUSTMENTS);
   const [eyedropperActive, setEyedropperActive] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState('');
+  const [showPresetSave, setShowPresetSave] = useState(false);
 
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
 
-  // Load the photo's real pixels once, capped to a size that's smooth to
-  // drag around on screen. Full resolution only gets used later, at save time.
   useEffect(() => {
     let cancelled = false;
     loadImageCanvas(image.file, 1000).then((canvas) => {
@@ -96,7 +85,29 @@ export default function Editor({ image, onClose, onSave }) {
     }
   };
 
-  // ---- Crop-mode layout + drawing ----
+  const handleAutoEnhance = () => {
+    if (!sourceCanvas) return;
+    setAdjustments(computeAutoEnhance(sourceCanvas));
+  };
+
+  const applyPreset = (preset) => {
+    setMode(preset.look.mode);
+    setRatioKey(preset.look.ratioKey);
+    setFitFill(preset.look.fitFill);
+    setAdjustments(preset.look.adjustments || DEFAULT_ADJUSTMENTS);
+    if (preset.look.mode === 'crop' && sourceCanvas) {
+      setCrop(computeCenteredCrop(sourceCanvas.width, sourceCanvas.height, RATIOS[preset.look.ratioKey]));
+    }
+  };
+
+  const handleSavePreset = () => {
+    const name = presetNameInput.trim();
+    if (!name) return;
+    onAddPreset(name, { mode, ratioKey, fitFill, adjustments });
+    setPresetNameInput('');
+    setShowPresetSave(false);
+  };
+
   const getCropLayout = useCallback(() => {
     if (!sourceCanvas) return null;
     const scale = Math.min(CROP_BOX / sourceCanvas.width, CROP_BOX / sourceCanvas.height);
@@ -120,9 +131,11 @@ export default function Editor({ image, onClose, onSave }) {
     ctx.clearRect(0, 0, CROP_BOX, CROP_BOX);
 
     const { offsetX, offsetY, drawW, drawH } = layout;
+    ctx.save();
+    ctx.filter = filterString(adjustments);
     ctx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, offsetX, offsetY, drawW, drawH);
+    ctx.restore();
 
-    // Dim everything, then re-draw the crop area at full brightness on top.
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(offsetX, offsetY, drawW, drawH);
 
@@ -132,6 +145,8 @@ export default function Editor({ image, onClose, onSave }) {
       w: crop.width * drawW,
       h: crop.height * drawH,
     };
+    ctx.save();
+    ctx.filter = filterString(adjustments);
     ctx.drawImage(
       sourceCanvas,
       crop.x * sourceCanvas.width,
@@ -143,6 +158,7 @@ export default function Editor({ image, onClose, onSave }) {
       rect.w,
       rect.h
     );
+    ctx.restore();
 
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
@@ -160,9 +176,8 @@ export default function Editor({ image, onClose, onSave }) {
       ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [sourceCanvas, crop, getCropLayout]);
+  }, [sourceCanvas, crop, adjustments, getCropLayout]);
 
-  // ---- Fit-mode layout + drawing ----
   const getFitBoxSize = useCallback(() => {
     const ratioValue = RATIOS[ratioKey] || 1;
     const longEdge = 380;
@@ -177,15 +192,22 @@ export default function Editor({ image, onClose, onSave }) {
     const { w, h } = getFitBoxSize();
     canvas.width = w;
     canvas.height = h;
-    drawEdit(canvas.getContext('2d'), sourceCanvas, sourceCanvas.width, sourceCanvas.height, { mode: 'fit', fitFill }, w, h);
-  }, [sourceCanvas, fitFill, getFitBoxSize]);
+    drawEdit(
+      canvas.getContext('2d'),
+      sourceCanvas,
+      sourceCanvas.width,
+      sourceCanvas.height,
+      { mode: 'fit', fitFill, adjustments },
+      w,
+      h
+    );
+  }, [sourceCanvas, fitFill, adjustments, getFitBoxSize]);
 
   useEffect(() => {
     if (mode === 'crop') drawCropPreview();
     else drawFitPreview();
   }, [mode, drawCropPreview, drawFitPreview]);
 
-  // ---- Pointer interaction (crop mode only) ----
   const toImageCoords = useCallback(
     (clientX, clientY) => {
       const canvas = canvasRef.current;
@@ -295,7 +317,6 @@ export default function Editor({ image, onClose, onSave }) {
     };
   }, [ratioKey, toImageCoords]);
 
-  // ---- Eyedropper (fit mode only — it picks the pad-fill color) ----
   const handleFitClick = (e) => {
     if (mode !== 'fit' || !eyedropperActive || !sourceCanvas) return;
     const canvas = canvasRef.current;
@@ -322,46 +343,16 @@ export default function Editor({ image, onClose, onSave }) {
     setEyedropperActive(false);
   };
 
-  // ---- Save: renders the final edit at full resolution, updates the
-  // library thumbnail, and downloads a copy to your device ----
   const handleSave = async () => {
     setSaving(true);
-    const fullCanvas = await loadImageCanvas(image.file);
-    const editState = { mode, ratioKey, crop, fitFill };
-
-    let outW, outH;
-    if (mode === 'crop') {
-      outW = Math.round(crop.width * fullCanvas.width);
-      outH = Math.round(crop.height * fullCanvas.height);
-    } else {
-      const ratioValue = RATIOS[ratioKey] || 1;
-      const longEdge = Math.max(fullCanvas.width, fullCanvas.height);
-      if (ratioValue >= 1) {
-        outW = longEdge;
-        outH = Math.round(longEdge / ratioValue);
-      } else {
-        outH = longEdge;
-        outW = Math.round(longEdge * ratioValue);
-      }
-    }
-
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = outW;
-    outCanvas.height = outH;
-    drawEdit(outCanvas.getContext('2d'), fullCanvas, fullCanvas.width, fullCanvas.height, editState, outW, outH);
-
-    const thumbScale = Math.min(1, 480 / Math.max(outW, outH));
-    const thumbCanvas = document.createElement('canvas');
-    thumbCanvas.width = Math.round(outW * thumbScale);
-    thumbCanvas.height = Math.round(outH * thumbScale);
-    thumbCanvas.getContext('2d').drawImage(outCanvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
-    const thumbBlob = await new Promise((resolve) => thumbCanvas.toBlob(resolve, 'image/jpeg', 0.82));
-    const newThumbUrl = URL.createObjectURL(thumbBlob);
+    const editState = { mode, ratioKey, crop, fitFill, adjustments };
+    const outCanvas = await renderFullEdit(image.file, editState);
+    const newThumbUrl = await makeThumbFromCanvas(outCanvas);
 
     const baseName = image.fileName.replace(/\.[^.]+$/, '');
     downloadCanvas(outCanvas, `${baseName}-edited.jpg`);
 
-    onSave(image.id, editState, newThumbUrl);
+    onSave(image.id, editState, newThumbUrl, 'edited');
     setSaving(false);
   };
 
@@ -384,6 +375,19 @@ export default function Editor({ image, onClose, onSave }) {
         </button>
         <span className="editor-filename">{image.fileName}</span>
       </div>
+
+      {presets.length > 0 && (
+        <div className="editor-preset-row">
+          <span className="editor-fill-label">Apply a saved preset:</span>
+          <div className="editor-fill-options">
+            {presets.map((p) => (
+              <button key={p.id} type="button" onClick={() => applyPreset(p)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="editor-modes">
         <button
@@ -469,6 +473,56 @@ export default function Editor({ image, onClose, onSave }) {
           {eyedropperActive && <p className="editor-hint">Tap anywhere on the photo to pick that color.</p>}
         </div>
       )}
+
+      <div className="editor-adjustments">
+        <div className="editor-adjustments-header">
+          <span className="editor-fill-label">Adjustments</span>
+          <button type="button" onClick={handleAutoEnhance}>
+            Auto-enhance
+          </button>
+        </div>
+        {[
+          ['brightness', 'Brightness'],
+          ['contrast', 'Contrast'],
+          ['saturation', 'Saturation'],
+        ].map(([key, label]) => (
+          <label key={key} className="editor-slider">
+            <span>{label}</span>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              value={adjustments[key]}
+              onChange={(e) => setAdjustments((a) => ({ ...a, [key]: Number(e.target.value) }))}
+            />
+            <span className="editor-slider-value">{adjustments[key]}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="editor-preset-save">
+        {showPresetSave ? (
+          <div className="editor-fill-options">
+            <input
+              type="text"
+              placeholder="Preset name"
+              value={presetNameInput}
+              onChange={(e) => setPresetNameInput(e.target.value)}
+              className="editor-preset-input"
+            />
+            <button type="button" onClick={handleSavePreset}>
+              Save preset
+            </button>
+            <button type="button" onClick={() => setShowPresetSave(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setShowPresetSave(true)}>
+            Save this look as a preset
+          </button>
+        )}
+      </div>
 
       <button type="button" className="editor-save" onClick={handleSave} disabled={saving}>
         {saving ? 'Saving…' : 'Save & download'}
