@@ -165,3 +165,33 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.preset-picker-wrap {
+  position: relative;
+}
+
+.preset-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+  z-index: 10;
+}
+
+.preset-picker button {
+  text-align: left;
+}
+
+.preset-picker-status {
+  font-size: 13px;
+  color: #6b6a66;
+  margin: 4px 8px;
+}
