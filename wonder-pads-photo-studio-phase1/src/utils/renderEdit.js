@@ -32,20 +32,58 @@ export function filterString(adjustments) {
   return `brightness(${100 + brightness}%) contrast(${100 + contrast}%) saturate(${100 + saturation}%)`;
 }
 
+// Fills the whole canvas with either a flat color or a cover-fit custom
+// image. Shared by Fit-mode padding and by Crop mode whenever the
+// background has been removed (the cutout has empty space that needs
+// something behind it).
+export function drawBackgroundFill(ctx, fill, outWidth, outHeight) {
+  if (fill?.type === 'image' && fill.imageCanvas) {
+    const iw = fill.imageCanvas.width;
+    const ih = fill.imageCanvas.height;
+    const coverScale = Math.max(outWidth / iw, outHeight / ih);
+    const cw = iw * coverScale;
+    const ch = ih * coverScale;
+    ctx.drawImage(fill.imageCanvas, (outWidth - cw) / 2, (outHeight - ch) / 2, cw, ch);
+  } else {
+    ctx.fillStyle = fill?.color || '#ffffff';
+    ctx.fillRect(0, 0, outWidth, outHeight);
+  }
+}
+
+// A plain gray/white checkerboard, the standard "this is transparent"
+// indicator — used only as an inspection view so leftover background
+// halos from an AI cutout are easy to spot against a neutral pattern.
+export function drawCheckerboard(ctx, width, height, size = 12) {
+  for (let y = 0; y < height; y += size) {
+    for (let x = 0; x < width; x += size) {
+      const dark = ((x / size + y / size) | 0) % 2 === 0;
+      ctx.fillStyle = dark ? '#d8d8d8' : '#ffffff';
+      ctx.fillRect(x, y, size, size);
+    }
+  }
+}
+
 // Draws whatever the current edit describes onto a canvas context, at
 // whatever output size you ask for. Called with a small size for the live
 // on-screen preview, and again with the full original size for downloads
 // and saved thumbnails — same instructions, different resolution.
+// "source" should already be whichever image belongs on top — the
+// original photo, or its background-removed cutout — the caller decides
+// that; this function just draws it.
 export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight) {
   ctx.clearRect(0, 0, outWidth, outHeight);
 
-  if (!editState || editState.mode === 'fit') {
+  if (editState?.mode === 'fit') {
     drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight);
     return;
   }
 
-  // Crop mode: take the chosen rectangle out of the source and stretch it
-  // to fill the whole output canvas.
+  // Crop mode. A background-removed cutout can have empty (transparent)
+  // space inside the crop rectangle, so paint a fill first in that case.
+  if (editState?.removeBackground) {
+    drawBackgroundFill(ctx, editState.fitFill, outWidth, outHeight);
+  }
+
   const crop = editState.crop || { x: 0, y: 0, width: 1, height: 1 };
   const sx = crop.x * srcWidth;
   const sy = crop.y * srcHeight;
@@ -73,8 +111,7 @@ function drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeigh
     ctx.drawImage(source, (outWidth - cw) / 2, (outHeight - ch) / 2, cw, ch);
     ctx.restore();
   } else {
-    ctx.fillStyle = fill.color || '#ffffff';
-    ctx.fillRect(0, 0, outWidth, outHeight);
+    drawBackgroundFill(ctx, fill, outWidth, outHeight);
   }
 
   // The full, untouched photo sits on top, scaled down to fit entirely
