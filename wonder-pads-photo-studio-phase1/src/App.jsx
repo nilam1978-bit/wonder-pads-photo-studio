@@ -18,11 +18,14 @@ function App() {
     isImporting,
     addFiles,
     removeImage,
+    clearAll,
     toggleSelect,
     selectAll,
     clearSelection,
     selectedCount,
     saveEdit,
+    setBgRemovedCanvas,
+    resetImage,
   } = useLibrary();
   const { presets, addPreset } = usePresets();
 
@@ -48,6 +51,14 @@ function App() {
     },
     [addFiles]
   );
+
+  const handleClearAll = () => {
+    if (images.length === 0) return;
+    const ok = window.confirm(
+      `Remove all ${images.length} photo${images.length === 1 ? '' : 's'} from the library? Anything you haven't downloaded yet will be lost.`
+    );
+    if (ok) clearAll();
+  };
 
   // Applies a saved preset's look to every currently-selected photo, one
   // at a time. Updates each photo's thumbnail and status in the library —
@@ -83,6 +94,8 @@ function App() {
         image={editingImage}
         presets={presets}
         onAddPreset={addPreset}
+        onBgRemoved={setBgRemovedCanvas}
+        onReset={resetImage}
         onClose={() => setEditingId(null)}
         onSave={(id, editState, newThumbUrl, status) => {
           saveEdit(id, editState, newThumbUrl, status);
@@ -159,6 +172,9 @@ function App() {
                 </div>
               )}
             </div>
+            <button type="button" className="toolbar-danger" onClick={handleClearAll}>
+              Clear all
+            </button>
           </div>
         </div>
       )}
