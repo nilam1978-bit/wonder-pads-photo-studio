@@ -20,6 +20,61 @@
   gap: 12px;
 }
 
+.editor-reset {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: #a33;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.editor-bg-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-bg-row button {
+  background: #f4f4f2;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2c2a;
+  cursor: pointer;
+}
+
+.editor-bg-row button.active {
+  background: #F1CFEA;
+  color: #5a2e51;
+}
+
+.editor-bg-row button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.editor-file-button {
+  background: #f4f4f2;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c2c2a;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.editor-file-button.active {
+  background: #F1CFEA;
+  color: #5a2e51;
+}
+
 .editor-back {
   background: none;
   border: none;
