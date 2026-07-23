@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { RATIOS, computeCenteredCrop, drawEdit, filterString } from '../utils/renderEdit';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RATIOS, computeCenteredCrop, drawEdit, drawCheckerboard, filterString } from '../utils/renderEdit';
 import { loadImageCanvas } from '../utils/loadImageCanvas';
 import { computeAutoEnhance } from '../utils/autoEnhance';
+import { removeBackgroundFromFile } from '../utils/removeBackground';
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from '../utils/exportImage';
 import './Editor.css';
 
@@ -9,6 +10,7 @@ const CROP_BOX = 380; // fixed square preview box used while in Crop mode
 const MIN_CROP_SIZE = 0.05; // smallest crop rect allowed, as a fraction of the image
 const HANDLE_HIT_RADIUS = 16; // px, generous so it's easy to grab on a phone
 const DEFAULT_ADJUSTMENTS = { brightness: 0, contrast: 0, saturation: 0 };
+const DEFAULT_FILL = { type: 'color', color: '#ffffff' };
 
 function ratioButtonsForMode(mode) {
   const all = ['free', '1:1', '4:5', '9:16', '16:9'];
@@ -42,22 +44,29 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
   return { x, y, width, height };
 }
 
-export default function Editor({ image, onClose, onSave, presets, onAddPreset }) {
+export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, presets, onAddPreset }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
   const [mode, setMode] = useState(initial.mode || 'crop');
   const [ratioKey, setRatioKey] = useState(initial.ratioKey || 'free');
   const [crop, setCrop] = useState(initial.crop || { x: 0, y: 0, width: 1, height: 1 });
-  const [fitFill, setFitFill] = useState(initial.fitFill || { type: 'color', color: '#ffffff' });
+  const [fitFill, setFitFill] = useState(initial.fitFill || DEFAULT_FILL);
   const [adjustments, setAdjustments] = useState(initial.adjustments || DEFAULT_ADJUSTMENTS);
+  const [removeBackground, setRemoveBackground] = useState(initial.removeBackground || false);
+  const [removingBackground, setRemovingBackground] = useState(false);
+  const [checkEdges, setCheckEdges] = useState(false);
   const [eyedropperActive, setEyedropperActive] = useState(false);
   const [saving, setSaving] = useState(false);
   const [presetNameInput, setPresetNameInput] = useState('');
   const [showPresetSave, setShowPresetSave] = useState(false);
+  const [bgImageVersion, setBgImageVersion] = useState(0);
 
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
+  const bgImageCanvasRef = useRef(null); // cached canvas for a custom uploaded backdrop
 
+  // Load the photo's real pixels once, capped to a size that's smooth to
+  // drag around on screen. Full resolution only gets used later, at save time.
   useEffect(() => {
     let cancelled = false;
     loadImageCanvas(image.file, 1000).then((canvas) => {
@@ -68,14 +77,43 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
     };
   }, [image.file]);
 
+  // Load a custom background image whenever one is chosen, so drawing
+  // doesn't have to decode it on every single preview frame.
+  useEffect(() => {
+    if (fitFill.type === 'image' && fitFill.imageFile) {
+      let cancelled = false;
+      loadImageCanvas(fitFill.imageFile, 1200).then((canvas) => {
+        if (!cancelled) {
+          bgImageCanvasRef.current = canvas;
+          setBgImageVersion((v) => v + 1);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [fitFill]);
+
+  // Whichever image should actually be drawn as "the photo" — the
+  // original, or its background-removed cutout. Both share the same
+  // pixel dimensions and aspect ratio, so all the crop/fit math below
+  // works identically either way.
+  const drawSource = removeBackground && image.bgRemovedCanvas ? image.bgRemovedCanvas : sourceCanvas;
+
+  const resolvedFill = useMemo(
+    () => (fitFill.type === 'image' ? { ...fitFill, imageCanvas: bgImageCanvasRef.current } : fitFill),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fitFill, bgImageVersion]
+  );
+
   const applyRatio = useCallback(
     (key, forMode) => {
       setRatioKey(key);
-      if (forMode === 'crop' && sourceCanvas) {
-        setCrop(computeCenteredCrop(sourceCanvas.width, sourceCanvas.height, RATIOS[key]));
+      if (forMode === 'crop' && drawSource) {
+        setCrop(computeCenteredCrop(drawSource.width, drawSource.height, RATIOS[key]));
       }
     },
-    [sourceCanvas]
+    [drawSource]
   );
 
   const handleModeChange = (newMode) => {
@@ -90,52 +128,90 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
     setAdjustments(computeAutoEnhance(sourceCanvas));
   };
 
+  const handleRemoveBackground = async () => {
+    if (image.bgRemovedCanvas) {
+      setRemoveBackground(true);
+      return;
+    }
+    setRemovingBackground(true);
+    try {
+      const canvas = await removeBackgroundFromFile(image.file);
+      onBgRemoved(image.id, canvas);
+      setRemoveBackground(true);
+    } catch (err) {
+      console.error('Background removal failed', err);
+    }
+    setRemovingBackground(false);
+  };
+
   const applyPreset = (preset) => {
     setMode(preset.look.mode);
     setRatioKey(preset.look.ratioKey);
     setFitFill(preset.look.fitFill);
     setAdjustments(preset.look.adjustments || DEFAULT_ADJUSTMENTS);
-    if (preset.look.mode === 'crop' && sourceCanvas) {
-      setCrop(computeCenteredCrop(sourceCanvas.width, sourceCanvas.height, RATIOS[preset.look.ratioKey]));
+    if (preset.look.mode === 'crop' && drawSource) {
+      setCrop(computeCenteredCrop(drawSource.width, drawSource.height, RATIOS[preset.look.ratioKey]));
     }
   };
 
   const handleSavePreset = () => {
     const name = presetNameInput.trim();
     if (!name) return;
+    // Presets deliberately don't capture background-removal state — it's
+    // an expensive, per-photo AI step, not a lightweight look setting.
     onAddPreset(name, { mode, ratioKey, fitFill, adjustments });
     setPresetNameInput('');
     setShowPresetSave(false);
   };
 
+  const handleReset = () => {
+    setMode('crop');
+    setRatioKey('free');
+    setCrop({ x: 0, y: 0, width: 1, height: 1 });
+    setFitFill(DEFAULT_FILL);
+    setAdjustments(DEFAULT_ADJUSTMENTS);
+    setRemoveBackground(false);
+    setCheckEdges(false);
+    onReset(image.id);
+  };
+
+  // ---- Crop-mode layout + drawing ----
   const getCropLayout = useCallback(() => {
-    if (!sourceCanvas) return null;
-    const scale = Math.min(CROP_BOX / sourceCanvas.width, CROP_BOX / sourceCanvas.height);
-    const drawW = sourceCanvas.width * scale;
-    const drawH = sourceCanvas.height * scale;
+    if (!drawSource) return null;
+    const scale = Math.min(CROP_BOX / drawSource.width, CROP_BOX / drawSource.height);
+    const drawW = drawSource.width * scale;
+    const drawH = drawSource.height * scale;
     return {
       offsetX: (CROP_BOX - drawW) / 2,
       offsetY: (CROP_BOX - drawH) / 2,
       drawW,
       drawH,
     };
-  }, [sourceCanvas]);
+  }, [drawSource]);
 
   const drawCropPreview = useCallback(() => {
     const canvas = canvasRef.current;
     const layout = getCropLayout();
-    if (!canvas || !layout || !sourceCanvas) return;
+    if (!canvas || !layout || !drawSource) return;
     canvas.width = CROP_BOX;
     canvas.height = CROP_BOX;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, CROP_BOX, CROP_BOX);
 
     const { offsetX, offsetY, drawW, drawH } = layout;
+
+    if (removeBackground) {
+      ctx.save();
+      drawCheckerboard(ctx, CROP_BOX, CROP_BOX, 10);
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.filter = filterString(adjustments);
-    ctx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, offsetX, offsetY, drawW, drawH);
+    ctx.drawImage(drawSource, 0, 0, drawSource.width, drawSource.height, offsetX, offsetY, drawW, drawH);
     ctx.restore();
 
+    // Dim everything, then re-draw the crop area at full brightness on top.
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(offsetX, offsetY, drawW, drawH);
 
@@ -145,14 +221,24 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
       w: crop.width * drawW,
       h: crop.height * drawH,
     };
+
+    if (removeBackground && !checkEdges) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rect.x, rect.y, rect.w, rect.h);
+      ctx.clip();
+      drawCheckerboard(ctx, CROP_BOX, CROP_BOX, 10);
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.filter = filterString(adjustments);
     ctx.drawImage(
-      sourceCanvas,
-      crop.x * sourceCanvas.width,
-      crop.y * sourceCanvas.height,
-      crop.width * sourceCanvas.width,
-      crop.height * sourceCanvas.height,
+      drawSource,
+      crop.x * drawSource.width,
+      crop.y * drawSource.height,
+      crop.width * drawSource.width,
+      crop.height * drawSource.height,
       rect.x,
       rect.y,
       rect.w,
@@ -176,8 +262,9 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
       ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [sourceCanvas, crop, adjustments, getCropLayout]);
+  }, [drawSource, crop, adjustments, removeBackground, checkEdges, getCropLayout]);
 
+  // ---- Fit-mode layout + drawing ----
   const getFitBoxSize = useCallback(() => {
     const ratioValue = RATIOS[ratioKey] || 1;
     const longEdge = 380;
@@ -188,26 +275,40 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
 
   const drawFitPreview = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !sourceCanvas) return;
+    if (!canvas || !drawSource) return;
     const { w, h } = getFitBoxSize();
     canvas.width = w;
     canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    if (removeBackground && checkEdges) {
+      drawCheckerboard(ctx, w, h, 10);
+      const containScale = Math.min(w / drawSource.width, h / drawSource.height);
+      const dw = drawSource.width * containScale;
+      const dh = drawSource.height * containScale;
+      ctx.drawImage(drawSource, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      return;
+    }
+
     drawEdit(
-      canvas.getContext('2d'),
-      sourceCanvas,
-      sourceCanvas.width,
-      sourceCanvas.height,
-      { mode: 'fit', fitFill, adjustments },
+      ctx,
+      drawSource,
+      drawSource.width,
+      drawSource.height,
+      { mode: 'fit', fitFill: resolvedFill, adjustments },
       w,
       h
     );
-  }, [sourceCanvas, fitFill, adjustments, getFitBoxSize]);
+  }, [drawSource, resolvedFill, adjustments, getFitBoxSize, removeBackground, checkEdges]);
 
   useEffect(() => {
     if (mode === 'crop') drawCropPreview();
     else drawFitPreview();
-  }, [mode, drawCropPreview, drawFitPreview]);
+    // bgImageVersion is a dependency so a freshly-loaded custom backdrop
+    // triggers a redraw once it's ready.
+  }, [mode, drawCropPreview, drawFitPreview, bgImageVersion]);
 
+  // ---- Pointer interaction (crop mode only) ----
   const toImageCoords = useCallback(
     (clientX, clientY) => {
       const canvas = canvasRef.current;
@@ -226,7 +327,7 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
   );
 
   const handlePointerDown = (e) => {
-    if (mode !== 'crop' || !sourceCanvas) return;
+    if (mode !== 'crop' || !drawSource) return;
     const layout = getCropLayout();
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -317,6 +418,11 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
     };
   }, [ratioKey, toImageCoords]);
 
+  // ---- Eyedropper — always samples the ORIGINAL photo (not the cutout),
+  // since that's the meaningful source of real background color even
+  // when you're currently viewing the background-removed version. Screen
+  // coordinates map the same way regardless of which one is on screen,
+  // since both share identical pixel dimensions. ----
   const handleFitClick = (e) => {
     if (mode !== 'fit' || !eyedropperActive || !sourceCanvas) return;
     const canvas = canvasRef.current;
@@ -343,10 +449,20 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
     setEyedropperActive(false);
   };
 
+  const handleBackgroundImagePick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setEyedropperActive(false);
+      setFitFill({ type: 'image', imageFile: file });
+    }
+  };
+
+  // ---- Save: renders the final edit at full resolution, updates the
+  // library thumbnail, and downloads a copy to your device ----
   const handleSave = async () => {
     setSaving(true);
-    const editState = { mode, ratioKey, crop, fitFill, adjustments };
-    const outCanvas = await renderFullEdit(image.file, editState);
+    const editState = { mode, ratioKey, crop, fitFill, adjustments, removeBackground };
+    const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas);
     const newThumbUrl = await makeThumbFromCanvas(outCanvas);
 
     const baseName = image.fileName.replace(/\.[^.]+$/, '');
@@ -367,6 +483,8 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
     );
   }
 
+  const showFillOptions = mode === 'fit' || removeBackground;
+
   return (
     <div className="editor">
       <div className="editor-topbar">
@@ -374,6 +492,9 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
           ← Back
         </button>
         <span className="editor-filename">{image.fileName}</span>
+        <button type="button" onClick={handleReset} className="editor-reset">
+          Reset
+        </button>
       </div>
 
       {presets.length > 0 && (
@@ -388,6 +509,34 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
           </div>
         </div>
       )}
+
+      <div className="editor-bg-row">
+        <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>
+          {removingBackground
+            ? 'Removing background…'
+            : removeBackground
+            ? '✓ Background removed'
+            : 'Remove background'}
+        </button>
+        {removeBackground && (
+          <>
+            <button type="button" onClick={() => setRemoveBackground(false)}>
+              Undo
+            </button>
+            <button
+              type="button"
+              className={checkEdges ? 'active' : ''}
+              onClick={() => setCheckEdges((v) => !v)}
+            >
+              Check edges
+            </button>
+          </>
+        )}
+      </div>
+      {removingBackground && (
+        <p className="editor-hint">First run downloads the model — this can take a little while.</p>
+      )}
+      {checkEdges && <p className="editor-hint">Checkerboard shows through any transparent area — look for faint color fringes.</p>}
 
       <div className="editor-modes">
         <button
@@ -431,9 +580,11 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
         <p className="editor-hint">Drag inside the box to move it, or drag a corner to resize.</p>
       )}
 
-      {mode === 'fit' && (
+      {showFillOptions && (
         <div className="editor-fill">
-          <span className="editor-fill-label">Fill the padded space with:</span>
+          <span className="editor-fill-label">
+            {removeBackground ? 'Background:' : 'Fill the padded space with:'}
+          </span>
           <div className="editor-fill-options">
             <button
               type="button"
@@ -459,16 +610,22 @@ export default function Editor({ image, onClose, onSave, presets, onAddPreset })
             >
               Eyedropper
             </button>
-            <button
-              type="button"
-              className={fitFill.type === 'blur' ? 'active' : ''}
-              onClick={() => {
-                setEyedropperActive(false);
-                setFitFill({ type: 'blur' });
-              }}
-            >
-              Blur-extend
-            </button>
+            {!removeBackground && (
+              <button
+                type="button"
+                className={fitFill.type === 'blur' ? 'active' : ''}
+                onClick={() => {
+                  setEyedropperActive(false);
+                  setFitFill({ type: 'blur' });
+                }}
+              >
+                Blur-extend
+              </button>
+            )}
+            <label className={`editor-file-button ${fitFill.type === 'image' ? 'active' : ''}`}>
+              Custom image
+              <input type="file" accept="image/*" onChange={handleBackgroundImagePick} hidden />
+            </label>
           </div>
           {eyedropperActive && <p className="editor-hint">Tap anywhere on the photo to pick that color.</p>}
         </div>
