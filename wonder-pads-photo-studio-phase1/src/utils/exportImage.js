@@ -4,16 +4,27 @@ import { loadImageCanvas } from './loadImageCanvas';
 // Renders an edit at full original resolution — the real, final-quality
 // output, used for downloads and for regenerating a photo's library
 // thumbnail after an edit or preset is applied.
-export async function renderFullEdit(file, editState) {
-  const fullCanvas = await loadImageCanvas(file);
+//
+// If the edit has the background removed, pass the already-computed
+// cutout canvas as bgRemovedCanvas so this doesn't have to re-run the AI
+// model — that only ever needs to happen once per photo.
+export async function renderFullEdit(file, editState, bgRemovedCanvas = null) {
+  const source = editState.removeBackground && bgRemovedCanvas ? bgRemovedCanvas : await loadImageCanvas(file);
+
+  let resolvedFitFill = editState.fitFill;
+  if (editState.fitFill?.type === 'image' && editState.fitFill.imageFile) {
+    const imageCanvas = await loadImageCanvas(editState.fitFill.imageFile, 1600);
+    resolvedFitFill = { ...editState.fitFill, imageCanvas };
+  }
+  const resolvedEditState = { ...editState, fitFill: resolvedFitFill };
 
   let outWidth, outHeight;
   if (editState.mode === 'crop') {
-    outWidth = Math.round(editState.crop.width * fullCanvas.width);
-    outHeight = Math.round(editState.crop.height * fullCanvas.height);
+    outWidth = Math.round(editState.crop.width * source.width);
+    outHeight = Math.round(editState.crop.height * source.height);
   } else {
     const ratioValue = RATIOS[editState.ratioKey] || 1;
-    const longEdge = Math.max(fullCanvas.width, fullCanvas.height);
+    const longEdge = Math.max(source.width, source.height);
     if (ratioValue >= 1) {
       outWidth = longEdge;
       outHeight = Math.round(longEdge / ratioValue);
@@ -26,7 +37,7 @@ export async function renderFullEdit(file, editState) {
   const outCanvas = document.createElement('canvas');
   outCanvas.width = outWidth;
   outCanvas.height = outHeight;
-  drawEdit(outCanvas.getContext('2d'), fullCanvas, fullCanvas.width, fullCanvas.height, editState, outWidth, outHeight);
+  drawEdit(outCanvas.getContext('2d'), source, source.width, source.height, resolvedEditState, outWidth, outHeight);
   return outCanvas;
 }
 
