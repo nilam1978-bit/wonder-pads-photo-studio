@@ -75,6 +75,56 @@
   color: #5a2e51;
 }
 
+.editor-text-panel,
+.editor-watermark-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f4f4f2;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.editor-text-panel > button:first-child {
+  align-self: flex-start;
+  background: #F1CFEA;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5a2e51;
+  cursor: pointer;
+}
+
+.editor-text-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.editor-text-controls input[type='text'] {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.editor-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.editor-watermark-panel {
+  margin-top: 4px;
+}
+
 .editor-back {
   background: none;
   border: none;
