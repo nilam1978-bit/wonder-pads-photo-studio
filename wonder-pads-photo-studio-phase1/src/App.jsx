@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
 import { usePresets } from './hooks/usePresets';
-import { RATIOS, computeCenteredCrop } from './utils/renderEdit';
+import { useWatermark } from './hooks/useWatermark';
+import { RATIOS, DEFAULT_WATERMARK, computeCenteredCrop } from './utils/renderEdit';
 import { renderFullEdit, makeThumbFromCanvas } from './utils/exportImage';
 import Editor from './components/Editor';
 import './App.css';
@@ -10,6 +11,17 @@ const STATUS_LABELS = {
   untouched: 'Untouched',
   edited: 'Edited',
   preset: 'Preset applied',
+};
+
+const DEFAULT_LOOK_EDIT_STATE = {
+  mode: 'crop',
+  ratioKey: 'free',
+  crop: { x: 0, y: 0, width: 1, height: 1 },
+  fitFill: { type: 'color', color: '#ffffff' },
+  adjustments: { brightness: 0, contrast: 0, saturation: 0 },
+  removeBackground: false,
+  textLayers: [],
+  watermark: DEFAULT_WATERMARK,
 };
 
 function App() {
@@ -28,11 +40,13 @@ function App() {
     resetImage,
   } = useLibrary();
   const { presets, addPreset } = usePresets();
+  const { logoCanvas, setLogoFile } = useWatermark();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showPresetPicker, setShowPresetPicker] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
+  const [applyingWatermark, setApplyingWatermark] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleFileInput = useCallback(
@@ -86,6 +100,22 @@ function App() {
     setShowPresetPicker(false);
   };
 
+  // Stamps the logo onto every selected photo, keeping whatever else is
+  // already set on each one (crop, fill, adjustments) untouched.
+  const handleApplyWatermark = async () => {
+    if (!logoCanvas) return;
+    setApplyingWatermark(true);
+    const targets = images.filter((img) => img.selected);
+    for (const img of targets) {
+      const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
+      const editState = { ...base, watermark: { ...DEFAULT_WATERMARK, ...base.watermark, enabled: true } };
+      const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
+      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+      saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+    }
+    setApplyingWatermark(false);
+  };
+
   const editingImage = images.find((img) => img.id === editingId);
 
   if (editingImage) {
@@ -96,6 +126,8 @@ function App() {
         onAddPreset={addPreset}
         onBgRemoved={setBgRemovedCanvas}
         onReset={resetImage}
+        logoCanvas={logoCanvas}
+        onSetLogo={setLogoFile}
         onClose={() => setEditingId(null)}
         onSave={(id, editState, newThumbUrl, status) => {
           saveEdit(id, editState, newThumbUrl, status);
@@ -172,6 +204,14 @@ function App() {
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              disabled={selectedCount === 0 || !logoCanvas || applyingWatermark}
+              title={!logoCanvas ? 'Upload your logo from any photo\'s editor first' : ''}
+              onClick={handleApplyWatermark}
+            >
+              {applyingWatermark ? 'Stamping…' : 'Add watermark'}
+            </button>
             <button type="button" className="toolbar-danger" onClick={handleClearAll}>
               Clear all
             </button>
