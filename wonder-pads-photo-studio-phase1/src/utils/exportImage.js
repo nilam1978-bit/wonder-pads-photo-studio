@@ -8,7 +8,7 @@ import { loadImageCanvas } from './loadImageCanvas';
 // If the edit has the background removed, pass the already-computed
 // cutout canvas as bgRemovedCanvas so this doesn't have to re-run the AI
 // model — that only ever needs to happen once per photo.
-export async function renderFullEdit(file, editState, bgRemovedCanvas = null) {
+export async function renderFullEdit(file, editState, bgRemovedCanvas = null, logoCanvas = null) {
   const source = editState.removeBackground && bgRemovedCanvas ? bgRemovedCanvas : await loadImageCanvas(file);
 
   let resolvedFitFill = editState.fitFill;
@@ -16,7 +16,9 @@ export async function renderFullEdit(file, editState, bgRemovedCanvas = null) {
     const imageCanvas = await loadImageCanvas(editState.fitFill.imageFile, 1600);
     resolvedFitFill = { ...editState.fitFill, imageCanvas };
   }
-  const resolvedEditState = { ...editState, fitFill: resolvedFitFill };
+  const resolvedWatermark =
+    editState.watermark?.enabled && logoCanvas ? { ...editState.watermark, logoCanvas } : editState.watermark;
+  const resolvedEditState = { ...editState, fitFill: resolvedFitFill, watermark: resolvedWatermark };
 
   let outWidth, outHeight;
   if (editState.mode === 'crop') {
