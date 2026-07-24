@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RATIOS, computeCenteredCrop, drawEdit, drawCheckerboard, filterString } from '../utils/renderEdit';
+import {
+  RATIOS,
+  DEFAULT_WATERMARK,
+  computeCenteredCrop,
+  drawEdit,
+  drawCheckerboard,
+  measureTextLayers,
+  filterString,
+} from '../utils/renderEdit';
 import { loadImageCanvas } from '../utils/loadImageCanvas';
 import { computeAutoEnhance } from '../utils/autoEnhance';
 import { removeBackgroundFromFile } from '../utils/removeBackground';
@@ -11,6 +19,11 @@ const MIN_CROP_SIZE = 0.05; // smallest crop rect allowed, as a fraction of the 
 const HANDLE_HIT_RADIUS = 16; // px, generous so it's easy to grab on a phone
 const DEFAULT_ADJUSTMENTS = { brightness: 0, contrast: 0, saturation: 0 };
 const DEFAULT_FILL = { type: 'color', color: '#ffffff' };
+const WATERMARK_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+
+function makeTextId() {
+  return `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
 
 function ratioButtonsForMode(mode) {
   const all = ['free', '1:1', '4:5', '9:16', '16:9'];
@@ -44,10 +57,11 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
   return { x, y, width, height };
 }
 
-export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, presets, onAddPreset }) {
+export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, presets, onAddPreset, logoCanvas, onSetLogo }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
   const [mode, setMode] = useState(initial.mode || 'crop');
+  const [activeTab, setActiveTab] = useState(initial.mode || 'crop');
   const [ratioKey, setRatioKey] = useState(initial.ratioKey || 'free');
   const [crop, setCrop] = useState(initial.crop || { x: 0, y: 0, width: 1, height: 1 });
   const [fitFill, setFitFill] = useState(initial.fitFill || DEFAULT_FILL);
@@ -56,6 +70,9 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   const [removingBackground, setRemovingBackground] = useState(false);
   const [checkEdges, setCheckEdges] = useState(false);
   const [eyedropperActive, setEyedropperActive] = useState(false);
+  const [textLayers, setTextLayers] = useState(initial.textLayers || []);
+  const [selectedTextId, setSelectedTextId] = useState(null);
+  const [watermark, setWatermark] = useState(initial.watermark || DEFAULT_WATERMARK);
   const [saving, setSaving] = useState(false);
   const [presetNameInput, setPresetNameInput] = useState('');
   const [showPresetSave, setShowPresetSave] = useState(false);
@@ -63,10 +80,10 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
 
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
+  const textDragRef = useRef(null);
+  const textBoundsRef = useRef([]);
   const bgImageCanvasRef = useRef(null); // cached canvas for a custom uploaded backdrop
 
-  // Load the photo's real pixels once, capped to a size that's smooth to
-  // drag around on screen. Full resolution only gets used later, at save time.
   useEffect(() => {
     let cancelled = false;
     loadImageCanvas(image.file, 1000).then((canvas) => {
@@ -77,8 +94,6 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     };
   }, [image.file]);
 
-  // Load a custom background image whenever one is chosen, so drawing
-  // doesn't have to decode it on every single preview frame.
   useEffect(() => {
     if (fitFill.type === 'image' && fitFill.imageFile) {
       let cancelled = false;
@@ -94,16 +109,17 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     }
   }, [fitFill]);
 
-  // Whichever image should actually be drawn as "the photo" — the
-  // original, or its background-removed cutout. Both share the same
-  // pixel dimensions and aspect ratio, so all the crop/fit math below
-  // works identically either way.
   const drawSource = removeBackground && image.bgRemovedCanvas ? image.bgRemovedCanvas : sourceCanvas;
 
   const resolvedFill = useMemo(
     () => (fitFill.type === 'image' ? { ...fitFill, imageCanvas: bgImageCanvasRef.current } : fitFill),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fitFill, bgImageVersion]
+  );
+
+  const resolvedWatermark = useMemo(
+    () => (watermark.enabled && logoCanvas ? { ...watermark, logoCanvas } : watermark),
+    [watermark, logoCanvas]
   );
 
   const applyRatio = useCallback(
@@ -116,10 +132,11 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     [drawSource]
   );
 
-  const handleModeChange = (newMode) => {
-    setMode(newMode);
-    if (newMode === 'fit' && ratioKey === 'free') {
-      applyRatio('4:5', 'fit');
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'crop' || tab === 'fit') {
+      setMode(tab);
+      if (tab === 'fit' && ratioKey === 'free') applyRatio('4:5', 'fit');
     }
   };
 
@@ -146,6 +163,7 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
 
   const applyPreset = (preset) => {
     setMode(preset.look.mode);
+    setActiveTab(preset.look.mode);
     setRatioKey(preset.look.ratioKey);
     setFitFill(preset.look.fitFill);
     setAdjustments(preset.look.adjustments || DEFAULT_ADJUSTMENTS);
@@ -157,8 +175,9 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   const handleSavePreset = () => {
     const name = presetNameInput.trim();
     if (!name) return;
-    // Presets deliberately don't capture background-removal state — it's
-    // an expensive, per-photo AI step, not a lightweight look setting.
+    // Presets deliberately don't capture background-removal, text, or
+    // watermark state — those are per-photo specifics (or an expensive
+    // AI step), not a lightweight reusable "look".
     onAddPreset(name, { mode, ratioKey, fitFill, adjustments });
     setPresetNameInput('');
     setShowPresetSave(false);
@@ -166,14 +185,45 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
 
   const handleReset = () => {
     setMode('crop');
+    setActiveTab('crop');
     setRatioKey('free');
     setCrop({ x: 0, y: 0, width: 1, height: 1 });
     setFitFill(DEFAULT_FILL);
     setAdjustments(DEFAULT_ADJUSTMENTS);
     setRemoveBackground(false);
     setCheckEdges(false);
+    setTextLayers([]);
+    setSelectedTextId(null);
+    setWatermark(DEFAULT_WATERMARK);
     onReset(image.id);
   };
+
+  // ---- Text layers ----
+  const addTextLayer = () => {
+    const layer = {
+      id: makeTextId(),
+      text: 'Your text',
+      x: 0.5,
+      y: 0.5,
+      fontSizeFrac: 0.08,
+      color: '#ffffff',
+      bgColor: null,
+    };
+    setTextLayers((prev) => [...prev, layer]);
+    setSelectedTextId(layer.id);
+    setActiveTab('text');
+  };
+
+  const updateTextLayer = (id, patch) => {
+    setTextLayers((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  };
+
+  const removeTextLayer = (id) => {
+    setTextLayers((prev) => prev.filter((l) => l.id !== id));
+    if (selectedTextId === id) setSelectedTextId(null);
+  };
+
+  const selectedTextLayer = textLayers.find((l) => l.id === selectedTextId) || null;
 
   // ---- Crop-mode layout + drawing ----
   const getCropLayout = useCallback(() => {
@@ -201,9 +251,7 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     const { offsetX, offsetY, drawW, drawH } = layout;
 
     if (removeBackground) {
-      ctx.save();
       drawCheckerboard(ctx, CROP_BOX, CROP_BOX, 10);
-      ctx.restore();
     }
 
     ctx.save();
@@ -211,7 +259,6 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     ctx.drawImage(drawSource, 0, 0, drawSource.width, drawSource.height, offsetX, offsetY, drawW, drawH);
     ctx.restore();
 
-    // Dim everything, then re-draw the crop area at full brightness on top.
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(offsetX, offsetY, drawW, drawH);
 
@@ -251,13 +298,12 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
     ctx.fillStyle = '#ffffff';
-    const corners = [
+    [
       [rect.x, rect.y],
       [rect.x + rect.w, rect.y],
       [rect.x, rect.y + rect.h],
       [rect.x + rect.w, rect.y + rect.h],
-    ];
-    corners.forEach(([cx, cy]) => {
+    ].forEach(([cx, cy]) => {
       ctx.beginPath();
       ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
@@ -301,14 +347,63 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     );
   }, [drawSource, resolvedFill, adjustments, getFitBoxSize, removeBackground, checkEdges]);
 
-  useEffect(() => {
-    if (mode === 'crop') drawCropPreview();
-    else drawFitPreview();
-    // bgImageVersion is a dependency so a freshly-loaded custom backdrop
-    // triggers a redraw once it's ready.
-  }, [mode, drawCropPreview, drawFitPreview, bgImageVersion]);
+  // ---- Text-tab: shows the fully composed result (whatever framing is
+  // currently set) with draggable text + watermark on top. This is the
+  // ONLY view that shares the exact output coordinate space, which is
+  // why text placement lives here rather than on the crop/fit canvases. ----
+  const getOutputBoxSize = useCallback(() => {
+    const longEdge = 380;
+    let aspect = 1;
+    if (mode === 'crop' && drawSource) {
+      aspect = (crop.width / crop.height) * (drawSource.width / drawSource.height);
+    } else {
+      aspect = RATIOS[ratioKey] || 1;
+    }
+    return aspect >= 1
+      ? { w: longEdge, h: Math.round(longEdge / aspect) }
+      : { w: Math.round(longEdge * aspect), h: longEdge };
+  }, [mode, crop, ratioKey, drawSource]);
 
-  // ---- Pointer interaction (crop mode only) ----
+  const drawTextPreview = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !drawSource) return;
+    const { w, h } = getOutputBoxSize();
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const previewEditState = {
+      mode,
+      ratioKey,
+      crop,
+      fitFill: resolvedFill,
+      adjustments,
+      removeBackground,
+      textLayers,
+      watermark: resolvedWatermark,
+    };
+    drawEdit(ctx, drawSource, drawSource.width, drawSource.height, previewEditState, w, h);
+    textBoundsRef.current = measureTextLayers(ctx, textLayers, w, h);
+
+    if (selectedTextId) {
+      const b = textBoundsRef.current.find((bb) => bb.id === selectedTextId);
+      if (b) {
+        ctx.save();
+        ctx.strokeStyle = '#c98cbf';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(b.x, b.y, b.width, b.height);
+        ctx.restore();
+      }
+    }
+  }, [drawSource, mode, ratioKey, crop, resolvedFill, adjustments, removeBackground, textLayers, resolvedWatermark, selectedTextId, getOutputBoxSize]);
+
+  useEffect(() => {
+    if (activeTab === 'crop') drawCropPreview();
+    else if (activeTab === 'fit') drawFitPreview();
+    else drawTextPreview();
+  }, [activeTab, drawCropPreview, drawFitPreview, drawTextPreview]);
+
+  // ---- Pointer interaction: crop-mode move/resize ----
   const toImageCoords = useCallback(
     (clientX, clientY) => {
       const canvas = canvasRef.current;
@@ -326,8 +421,8 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     [getCropLayout]
   );
 
-  const handlePointerDown = (e) => {
-    if (mode !== 'crop' || !drawSource) return;
+  const handleCropPointerDown = (e) => {
+    if (!drawSource) return;
     const layout = getCropLayout();
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -418,13 +513,11 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     };
   }, [ratioKey, toImageCoords]);
 
-  // ---- Eyedropper — always samples the ORIGINAL photo (not the cutout),
-  // since that's the meaningful source of real background color even
-  // when you're currently viewing the background-removed version. Screen
-  // coordinates map the same way regardless of which one is on screen,
-  // since both share identical pixel dimensions. ----
+  // ---- Eyedropper — always samples the ORIGINAL photo, since that's the
+  // meaningful source of real background color even when currently
+  // viewing the background-removed version. ----
   const handleFitClick = (e) => {
-    if (mode !== 'fit' || !eyedropperActive || !sourceCanvas) return;
+    if (!eyedropperActive || !sourceCanvas) return;
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const { w, h } = getFitBoxSize();
@@ -457,12 +550,79 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     }
   };
 
+  // ---- Text-tab dragging ----
+  const handleTextPointerDown = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const localX = (e.clientX - rect.left) * scaleX;
+    const localY = (e.clientY - rect.top) * scaleY;
+    const hit = textBoundsRef.current.find(
+      (b) => localX >= b.x && localX <= b.x + b.width && localY >= b.y && localY <= b.y + b.height
+    );
+    if (hit) {
+      setSelectedTextId(hit.id);
+      const layer = textLayers.find((l) => l.id === hit.id);
+      textDragRef.current = {
+        id: hit.id,
+        startPointerX: localX,
+        startPointerY: localY,
+        startX: layer.x,
+        startY: layer.y,
+        boxW: canvas.width,
+        boxH: canvas.height,
+      };
+    } else {
+      setSelectedTextId(null);
+    }
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      const drag = textDragRef.current;
+      if (!drag) return;
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const localX = (e.clientX - rect.left) * scaleX;
+      const localY = (e.clientY - rect.top) * scaleY;
+      const dx = (localX - drag.startPointerX) / drag.boxW;
+      const dy = (localY - drag.startPointerY) / drag.boxH;
+      updateTextLayer(drag.id, {
+        x: Math.min(1, Math.max(0, drag.startX + dx)),
+        y: Math.min(1, Math.max(0, drag.startY + dy)),
+      });
+    };
+    const handleUp = () => {
+      textDragRef.current = null;
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, []);
+
+  const handleCanvasPointerDown = (e) => {
+    if (activeTab === 'crop') handleCropPointerDown(e);
+    else if (activeTab === 'fit') handleFitClick(e);
+    else handleTextPointerDown(e);
+  };
+
+  const handleLogoPick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) onSetLogo(file);
+  };
+
   // ---- Save: renders the final edit at full resolution, updates the
   // library thumbnail, and downloads a copy to your device ----
   const handleSave = async () => {
     setSaving(true);
-    const editState = { mode, ratioKey, crop, fitFill, adjustments, removeBackground };
-    const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas);
+    const editState = { mode, ratioKey, crop, fitFill, adjustments, removeBackground, textLayers, watermark };
+    const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas, logoCanvas);
     const newThumbUrl = await makeThumbFromCanvas(outCanvas);
 
     const baseName = image.fileName.replace(/\.[^.]+$/, '');
@@ -483,7 +643,7 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     );
   }
 
-  const showFillOptions = mode === 'fit' || removeBackground;
+  const showFillOptions = activeTab === 'fit' || (activeTab !== 'text' && removeBackground);
 
   return (
     <div className="editor">
@@ -539,44 +699,41 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
       {checkEdges && <p className="editor-hint">Checkerboard shows through any transparent area — look for faint color fringes.</p>}
 
       <div className="editor-modes">
-        <button
-          type="button"
-          className={mode === 'crop' ? 'active' : ''}
-          onClick={() => handleModeChange('crop')}
-        >
+        <button type="button" className={activeTab === 'crop' ? 'active' : ''} onClick={() => handleTabChange('crop')}>
           Crop
         </button>
-        <button
-          type="button"
-          className={mode === 'fit' ? 'active' : ''}
-          onClick={() => handleModeChange('fit')}
-        >
+        <button type="button" className={activeTab === 'fit' ? 'active' : ''} onClick={() => handleTabChange('fit')}>
           Fit &amp; pad
+        </button>
+        <button type="button" className={activeTab === 'text' ? 'active' : ''} onClick={() => handleTabChange('text')}>
+          Text &amp; logo
         </button>
       </div>
 
       <div className="editor-canvas-wrap">
         <canvas
           ref={canvasRef}
-          onPointerDown={mode === 'crop' ? handlePointerDown : handleFitClick}
+          onPointerDown={handleCanvasPointerDown}
           className={eyedropperActive ? 'editor-canvas eyedropper' : 'editor-canvas'}
         />
       </div>
 
-      <div className="editor-ratios">
-        {ratioButtonsForMode(mode).map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={ratioKey === key ? 'active' : ''}
-            onClick={() => applyRatio(key, mode)}
-          >
-            {key === 'free' ? 'Freeform' : key}
-          </button>
-        ))}
-      </div>
+      {activeTab !== 'text' && (
+        <div className="editor-ratios">
+          {ratioButtonsForMode(activeTab).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={ratioKey === key ? 'active' : ''}
+              onClick={() => applyRatio(key, activeTab)}
+            >
+              {key === 'free' ? 'Freeform' : key}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {mode === 'crop' && (
+      {activeTab === 'crop' && (
         <p className="editor-hint">Drag inside the box to move it, or drag a corner to resize.</p>
       )}
 
@@ -603,11 +760,7 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
                 onChange={(e) => setFitFill({ type: 'color', color: e.target.value })}
               />
             )}
-            <button
-              type="button"
-              className={eyedropperActive ? 'active' : ''}
-              onClick={() => setEyedropperActive((v) => !v)}
-            >
+            <button type="button" className={eyedropperActive ? 'active' : ''} onClick={() => setEyedropperActive((v) => !v)}>
               Eyedropper
             </button>
             {!removeBackground && (
@@ -631,31 +784,168 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
         </div>
       )}
 
-      <div className="editor-adjustments">
-        <div className="editor-adjustments-header">
-          <span className="editor-fill-label">Adjustments</span>
-          <button type="button" onClick={handleAutoEnhance}>
-            Auto-enhance
+      {activeTab === 'text' && (
+        <div className="editor-text-panel">
+          <button type="button" onClick={addTextLayer}>
+            + Add text
           </button>
+
+          {textLayers.length > 0 && (
+            <div className="editor-fill-options">
+              {textLayers.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  className={selectedTextId === l.id ? 'active' : ''}
+                  onClick={() => setSelectedTextId(l.id)}
+                >
+                  {l.text || '(empty)'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selectedTextLayer && (
+            <div className="editor-text-controls">
+              <input
+                type="text"
+                value={selectedTextLayer.text}
+                onChange={(e) => updateTextLayer(selectedTextLayer.id, { text: e.target.value })}
+                placeholder="Type your text"
+              />
+              <label className="editor-slider">
+                <span>Size</span>
+                <input
+                  type="range"
+                  min={2}
+                  max={20}
+                  value={Math.round(selectedTextLayer.fontSizeFrac * 100)}
+                  onChange={(e) => updateTextLayer(selectedTextLayer.id, { fontSizeFrac: Number(e.target.value) / 100 })}
+                />
+                <span className="editor-slider-value">{Math.round(selectedTextLayer.fontSizeFrac * 100)}%</span>
+              </label>
+              <div className="editor-fill-options">
+                <span className="editor-fill-label">Text color</span>
+                <input
+                  type="color"
+                  value={selectedTextLayer.color}
+                  onChange={(e) => updateTextLayer(selectedTextLayer.id, { color: e.target.value })}
+                />
+                <label className="editor-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={!!selectedTextLayer.bgColor}
+                    onChange={(e) => updateTextLayer(selectedTextLayer.id, { bgColor: e.target.checked ? '#000000' : null })}
+                  />
+                  Background chip
+                </label>
+                {selectedTextLayer.bgColor && (
+                  <input
+                    type="color"
+                    value={selectedTextLayer.bgColor}
+                    onChange={(e) => updateTextLayer(selectedTextLayer.id, { bgColor: e.target.value })}
+                  />
+                )}
+                <button type="button" onClick={() => removeTextLayer(selectedTextLayer.id)}>
+                  Delete
+                </button>
+              </div>
+              <p className="editor-hint">Drag the text directly on the photo above to reposition it.</p>
+            </div>
+          )}
+
+          <div className="editor-watermark-panel">
+            <span className="editor-fill-label">Logo watermark</span>
+            {!logoCanvas ? (
+              <label className="editor-file-button">
+                Upload your logo
+                <input type="file" accept="image/*" onChange={handleLogoPick} hidden />
+              </label>
+            ) : (
+              <>
+                <label className="editor-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={watermark.enabled}
+                    onChange={(e) => setWatermark((w) => ({ ...w, enabled: e.target.checked }))}
+                  />
+                  Add watermark to this photo
+                </label>
+                {watermark.enabled && (
+                  <>
+                    <div className="editor-fill-options">
+                      {WATERMARK_CORNERS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className={watermark.corner === c ? 'active' : ''}
+                          onClick={() => setWatermark((w) => ({ ...w, corner: c }))}
+                        >
+                          {c.replace('-', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="editor-slider">
+                      <span>Size</span>
+                      <input
+                        type="range"
+                        min={5}
+                        max={40}
+                        value={Math.round(watermark.scale * 100)}
+                        onChange={(e) => setWatermark((w) => ({ ...w, scale: Number(e.target.value) / 100 }))}
+                      />
+                      <span className="editor-slider-value">{Math.round(watermark.scale * 100)}%</span>
+                    </label>
+                    <label className="editor-slider">
+                      <span>Opacity</span>
+                      <input
+                        type="range"
+                        min={10}
+                        max={100}
+                        value={Math.round(watermark.opacity * 100)}
+                        onChange={(e) => setWatermark((w) => ({ ...w, opacity: Number(e.target.value) / 100 }))}
+                      />
+                      <span className="editor-slider-value">{Math.round(watermark.opacity * 100)}%</span>
+                    </label>
+                    <label className="editor-file-button">
+                      Change logo
+                      <input type="file" accept="image/*" onChange={handleLogoPick} hidden />
+                    </label>
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
-        {[
-          ['brightness', 'Brightness'],
-          ['contrast', 'Contrast'],
-          ['saturation', 'Saturation'],
-        ].map(([key, label]) => (
-          <label key={key} className="editor-slider">
-            <span>{label}</span>
-            <input
-              type="range"
-              min={-100}
-              max={100}
-              value={adjustments[key]}
-              onChange={(e) => setAdjustments((a) => ({ ...a, [key]: Number(e.target.value) }))}
-            />
-            <span className="editor-slider-value">{adjustments[key]}</span>
-          </label>
-        ))}
-      </div>
+      )}
+
+      {activeTab !== 'text' && (
+        <div className="editor-adjustments">
+          <div className="editor-adjustments-header">
+            <span className="editor-fill-label">Adjustments</span>
+            <button type="button" onClick={handleAutoEnhance}>
+              Auto-enhance
+            </button>
+          </div>
+          {[
+            ['brightness', 'Brightness'],
+            ['contrast', 'Contrast'],
+            ['saturation', 'Saturation'],
+          ].map(([key, label]) => (
+            <label key={key} className="editor-slider">
+              <span>{label}</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={adjustments[key]}
+                onChange={(e) => setAdjustments((a) => ({ ...a, [key]: Number(e.target.value) }))}
+              />
+              <span className="editor-slider-value">{adjustments[key]}</span>
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="editor-preset-save">
         {showPresetSave ? (
