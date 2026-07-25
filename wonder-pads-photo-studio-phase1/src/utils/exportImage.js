@@ -9,7 +9,11 @@ import { loadImageCanvas } from './loadImageCanvas';
 // cutout canvas as bgRemovedCanvas so this doesn't have to re-run the AI
 // model — that only ever needs to happen once per photo.
 export async function renderFullEdit(file, editState, bgRemovedCanvas = null, logoCanvas = null) {
-  const source = editState.removeBackground && bgRemovedCanvas ? bgRemovedCanvas : await loadImageCanvas(file);
+  const usingCutout = editState.removeBackground && bgRemovedCanvas;
+  const source = usingCutout ? bgRemovedCanvas : await loadImageCanvas(file);
+  // The "restore" brush tool needs the real original photo to paint back
+  // in — only worth the extra load when the cutout is actually in use.
+  const originalSource = usingCutout ? await loadImageCanvas(file) : source;
 
   let resolvedFitFill = editState.fitFill;
   if (editState.fitFill?.type === 'image' && editState.fitFill.imageFile) {
@@ -39,7 +43,16 @@ export async function renderFullEdit(file, editState, bgRemovedCanvas = null, lo
   const outCanvas = document.createElement('canvas');
   outCanvas.width = outWidth;
   outCanvas.height = outHeight;
-  drawEdit(outCanvas.getContext('2d'), source, source.width, source.height, resolvedEditState, outWidth, outHeight);
+  drawEdit(
+    outCanvas.getContext('2d'),
+    source,
+    source.width,
+    source.height,
+    resolvedEditState,
+    outWidth,
+    outHeight,
+    originalSource
+  );
   return outCanvas;
 }
 
