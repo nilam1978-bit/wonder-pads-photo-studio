@@ -195,3 +195,34 @@
   color: #6b6a66;
   margin: 4px 8px;
 }
+
+.export-panel {
+  min-width: 220px;
+  gap: 8px;
+}
+
+.export-panel .editor-fill-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b6a66;
+  margin-top: 4px;
+}
+
+.export-panel .editor-fill-options button,
+.export-panel .editor-fill-options {
+  font-size: 12px;
+}
+
+.export-go-button {
+  margin-top: 6px;
+  background: #5a2e51 !important;
+  color: #fff !important;
+  font-weight: 600;
+  padding: 10px !important;
+  border-radius: 8px;
+}
+
+.toolbar-danger {
+  background: #fbeaea;
+  color: #a33;
+}
