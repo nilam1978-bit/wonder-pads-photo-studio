@@ -125,6 +125,19 @@
   margin-top: 4px;
 }
 
+.editor-touchup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f4f4f2;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.editor-canvas.brushing {
+  cursor: crosshair;
+}
+
 .editor-back {
   background: none;
   border: none;
