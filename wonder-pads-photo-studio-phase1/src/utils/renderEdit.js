@@ -1,5 +1,17 @@
 export const DEFAULT_WATERMARK = { enabled: false, corner: 'bottom-right', scale: 0.18, opacity: 0.9 };
 
+export const DEFAULT_LOOK_EDIT_STATE = {
+  mode: 'crop',
+  ratioKey: 'free',
+  crop: { x: 0, y: 0, width: 1, height: 1 },
+  fitFill: { type: 'color', color: '#ffffff' },
+  adjustments: { brightness: 0, contrast: 0, saturation: 0 },
+  removeBackground: false,
+  brushStrokes: [],
+  textLayers: [],
+  watermark: DEFAULT_WATERMARK,
+};
+
 // Every ratio button maps to a width/height number. "free" has no ratio —
 // you're dragging by hand with nothing enforced.
 export const RATIOS = {
@@ -65,14 +77,40 @@ export function drawCheckerboard(ctx, width, height, size = 12) {
   }
 }
 
+// Draws just the photo itself, positioned per the current crop or fit
+// framing — no background fill, no text, no watermark. Shared by the
+// main render AND by the "restore" brush tool, which needs to draw the
+// ORIGINAL photo in that exact same position so a brushed area can bring
+// back exactly the right pixels.
+function drawFramedPhotoOnly(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight) {
+  ctx.save();
+  ctx.filter = filterString(editState?.adjustments);
+  if (editState?.mode === 'fit') {
+    const containScale = Math.min(outWidth / srcWidth, outHeight / srcHeight);
+    const dw = srcWidth * containScale;
+    const dh = srcHeight * containScale;
+    ctx.drawImage(source, (outWidth - dw) / 2, (outHeight - dh) / 2, dw, dh);
+  } else {
+    const crop = editState?.crop || { x: 0, y: 0, width: 1, height: 1 };
+    const sx = crop.x * srcWidth;
+    const sy = crop.y * srcHeight;
+    const sw = crop.width * srcWidth;
+    const sh = crop.height * srcHeight;
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, outWidth, outHeight);
+  }
+  ctx.restore();
+}
+
 // Draws whatever the current edit describes onto a canvas context, at
 // whatever output size you ask for. Called with a small size for the live
 // on-screen preview, and again with the full original size for downloads
 // and saved thumbnails — same instructions, different resolution.
 // "source" should already be whichever image belongs on top — the
 // original photo, or its background-removed cutout — the caller decides
-// that; this function just draws it.
-export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight) {
+// that; this function just draws it. "originalSource", if given, is used
+// only by the "restore" brush tool to bring back pre-cutout pixels in a
+// brushed area.
+export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight, originalSource = null) {
   ctx.clearRect(0, 0, outWidth, outHeight);
 
   if (editState?.mode === 'fit') {
@@ -83,16 +121,13 @@ export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, 
     if (editState?.removeBackground) {
       drawBackgroundFill(ctx, editState.fitFill, outWidth, outHeight);
     }
+    drawFramedPhotoOnly(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight);
+  }
 
-    const crop = editState.crop || { x: 0, y: 0, width: 1, height: 1 };
-    const sx = crop.x * srcWidth;
-    const sy = crop.y * srcHeight;
-    const sw = crop.width * srcWidth;
-    const sh = crop.height * srcHeight;
-    ctx.save();
-    ctx.filter = filterString(editState.adjustments);
-    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, outWidth, outHeight);
-    ctx.restore();
+  // Brush touch-ups (blur / erase / restore) apply to the photo itself,
+  // before text or a logo ever get added on top.
+  if (editState?.brushStrokes?.length) {
+    applyBrushStrokes(ctx, editState, source, originalSource, srcWidth, srcHeight, outWidth, outHeight);
   }
 
   // Text and watermark sit on top of the finished framing, in that
@@ -102,6 +137,81 @@ export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, 
   }
   if (editState?.watermark?.enabled && editState.watermark.logoCanvas) {
     drawWatermark(ctx, editState.watermark, outWidth, outHeight);
+  }
+}
+
+// Traces each stroke's path as a thick round-cornered line (or a single
+// dot for a tap with no drag) — the shared shape used both as a visible
+// mask and as an erase path.
+function strokePathOnto(ctx, strokes, outWidth, outHeight) {
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  strokes.forEach((s) => {
+    const r = (s.brushSize * outWidth) / 2;
+    if (s.points.length <= 1) {
+      const p = s.points[0];
+      if (!p) return;
+      ctx.beginPath();
+      ctx.arc(p.x * outWidth, p.y * outHeight, r, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    ctx.lineWidth = s.brushSize * outWidth;
+    ctx.beginPath();
+    s.points.forEach((p, i) => {
+      const x = p.x * outWidth;
+      const y = p.y * outHeight;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+}
+
+// Blur, erase, and restore are each their own pass, applied in that
+// order, so overlapping touch-ups combine the way you'd expect from
+// painting them on in that sequence.
+function applyBrushStrokes(ctx, editState, source, originalSource, srcWidth, srcHeight, outWidth, outHeight) {
+  const strokes = editState.brushStrokes || [];
+  const blurStrokes = strokes.filter((s) => s.tool === 'blur');
+  const restoreStrokes = strokes.filter((s) => s.tool === 'restore');
+  const eraseStrokes = strokes.filter((s) => s.tool === 'erase');
+
+  if (blurStrokes.length) {
+    const blurred = document.createElement('canvas');
+    blurred.width = outWidth;
+    blurred.height = outHeight;
+    const bctx = blurred.getContext('2d');
+    bctx.filter = `blur(${Math.max(4, Math.round(outWidth * 0.025))}px)`;
+    bctx.drawImage(ctx.canvas, 0, 0);
+    bctx.filter = 'none';
+    bctx.globalCompositeOperation = 'destination-in';
+    bctx.fillStyle = '#fff';
+    bctx.strokeStyle = '#fff';
+    strokePathOnto(bctx, blurStrokes, outWidth, outHeight);
+    ctx.drawImage(blurred, 0, 0);
+  }
+
+  if (restoreStrokes.length && originalSource) {
+    const restored = document.createElement('canvas');
+    restored.width = outWidth;
+    restored.height = outHeight;
+    const rctx = restored.getContext('2d');
+    drawFramedPhotoOnly(rctx, originalSource, srcWidth, srcHeight, editState, outWidth, outHeight);
+    rctx.globalCompositeOperation = 'destination-in';
+    rctx.fillStyle = '#fff';
+    rctx.strokeStyle = '#fff';
+    strokePathOnto(rctx, restoreStrokes, outWidth, outHeight);
+    ctx.drawImage(restored, 0, 0);
+  }
+
+  if (eraseStrokes.length) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = '#000';
+    strokePathOnto(ctx, eraseStrokes, outWidth, outHeight);
+    ctx.restore();
   }
 }
 
@@ -127,13 +237,7 @@ function drawFit(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeigh
   // The full, untouched photo sits on top, scaled down to fit entirely
   // inside the frame (nothing cropped away). Adjustments apply here, to
   // the actual product photo.
-  const containScale = Math.min(outWidth / srcWidth, outHeight / srcHeight);
-  const dw = srcWidth * containScale;
-  const dh = srcHeight * containScale;
-  ctx.save();
-  ctx.filter = filterString(editState?.adjustments);
-  ctx.drawImage(source, (outWidth - dw) / 2, (outHeight - dh) / 2, dw, dh);
-  ctx.restore();
+  drawFramedPhotoOnly(ctx, source, srcWidth, srcHeight, editState, outWidth, outHeight);
 }
 
 function roundRectPath(ctx, x, y, w, h, r) {
