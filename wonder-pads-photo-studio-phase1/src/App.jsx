@@ -2,8 +2,10 @@ import { useCallback, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
 import { usePresets } from './hooks/usePresets';
 import { useWatermark } from './hooks/useWatermark';
-import { RATIOS, DEFAULT_WATERMARK, computeCenteredCrop } from './utils/renderEdit';
-import { renderFullEdit, makeThumbFromCanvas } from './utils/exportImage';
+import { RATIOS, DEFAULT_LOOK_EDIT_STATE, computeCenteredCrop } from './utils/renderEdit';
+import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from './utils/exportImage';
+import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
+import { buildCollage } from './utils/collage';
 import Editor from './components/Editor';
 import './App.css';
 
@@ -13,16 +15,13 @@ const STATUS_LABELS = {
   preset: 'Preset applied',
 };
 
-const DEFAULT_LOOK_EDIT_STATE = {
-  mode: 'crop',
-  ratioKey: 'free',
-  crop: { x: 0, y: 0, width: 1, height: 1 },
-  fitFill: { type: 'color', color: '#ffffff' },
-  adjustments: { brightness: 0, contrast: 0, saturation: 0 },
-  removeBackground: false,
-  textLayers: [],
-  watermark: DEFAULT_WATERMARK,
-};
+const FORMATS = ['jpeg', 'png', 'webp'];
+const GRID_OPTIONS = [
+  { cols: 2, rows: 2 },
+  { cols: 3, rows: 2 },
+  { cols: 2, rows: 3 },
+  { cols: 3, rows: 3 },
+];
 
 function App() {
   const {
@@ -47,6 +46,18 @@ function App() {
   const [showPresetPicker, setShowPresetPicker] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
   const [applyingWatermark, setApplyingWatermark] = useState(false);
+
+  const [showExportPanel, setShowExportPanel] = useState(false);
+  const [exportFormat, setExportFormat] = useState('jpeg');
+  const [exportSizePreset, setExportSizePreset] = useState('social');
+  const [exportRename, setExportRename] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(null);
+
+  const [showCollagePanel, setShowCollagePanel] = useState(false);
+  const [collageGrid, setCollageGrid] = useState(GRID_OPTIONS[3]);
+  const [buildingCollage, setBuildingCollage] = useState(false);
+
   const fileInputRef = useRef(null);
 
   const handleFileInput = useCallback(
@@ -76,9 +87,7 @@ function App() {
 
   // Applies a saved preset's look to every currently-selected photo, one
   // at a time. Updates each photo's thumbnail and status in the library —
-  // it doesn't trigger a download for each one (that's what the Editor's
-  // single-photo Save button is for); a proper "download the whole batch"
-  // step is planned for a later phase.
+  // it doesn't trigger a download for each one; use Export for that.
   const handleApplyPreset = async (preset) => {
     setApplyingPreset(true);
     const targets = images.filter((img) => img.selected);
@@ -108,12 +117,51 @@ function App() {
     const targets = images.filter((img) => img.selected);
     for (const img of targets) {
       const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
-      const editState = { ...base, watermark: { ...DEFAULT_WATERMARK, ...base.watermark, enabled: true } };
+      const editState = { ...base, watermark: { ...DEFAULT_LOOK_EDIT_STATE.watermark, ...base.watermark, enabled: true } };
       const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
       const newThumbUrl = await makeThumbFromCanvas(outCanvas);
       saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
     }
     setApplyingWatermark(false);
+  };
+
+  // Renders every selected photo at the chosen format/size (renamed by
+  // pattern if given) and bundles them into one zip download. Every photo
+  // that passes through this — even ones you never opened in the Editor —
+  // comes out with its phone's EXIF/GPS metadata stripped, since that's
+  // just how re-encoding through canvas works.
+  const handleExport = async () => {
+    const targets = images.filter((img) => img.selected);
+    if (targets.length === 0) return;
+    setExporting(true);
+    setExportProgress({ done: 0, total: targets.length });
+    try {
+      const zipBlob = await exportImagesAsZip(
+        targets,
+        { format: exportFormat, sizePreset: exportSizePreset, renamePattern: exportRename.trim() || null },
+        { logoCanvas, onProgress: (done, total) => setExportProgress({ done, total }) }
+      );
+      downloadBlob(zipBlob, 'wonder-pads-export.zip');
+      setShowExportPanel(false);
+    } catch (err) {
+      console.error('Export failed', err);
+    }
+    setExporting(false);
+    setExportProgress(null);
+  };
+
+  const handleBuildCollage = async () => {
+    const targets = images.filter((img) => img.selected);
+    if (targets.length < 2) return;
+    setBuildingCollage(true);
+    try {
+      const canvas = await buildCollage(targets, collageGrid.cols, collageGrid.rows, { logoCanvas });
+      downloadCanvas(canvas, 'wonder-pads-collage.jpg');
+      setShowCollagePanel(false);
+    } catch (err) {
+      console.error('Collage failed', err);
+    }
+    setBuildingCollage(false);
   };
 
   const editingImage = images.find((img) => img.id === editingId);
@@ -207,11 +255,82 @@ function App() {
             <button
               type="button"
               disabled={selectedCount === 0 || !logoCanvas || applyingWatermark}
-              title={!logoCanvas ? 'Upload your logo from any photo\'s editor first' : ''}
+              title={!logoCanvas ? "Upload your logo from any photo's editor first" : ''}
               onClick={handleApplyWatermark}
             >
               {applyingWatermark ? 'Stamping…' : 'Add watermark'}
             </button>
+            <div className="preset-picker-wrap">
+              <button type="button" disabled={selectedCount === 0} onClick={() => setShowExportPanel((v) => !v)}>
+                Export
+              </button>
+              {showExportPanel && (
+                <div className="preset-picker export-panel">
+                  <span className="editor-fill-label">Format</span>
+                  <div className="editor-fill-options">
+                    {FORMATS.map((f) => (
+                      <button key={f} type="button" className={exportFormat === f ? 'active' : ''} onClick={() => setExportFormat(f)}>
+                        {f.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="editor-fill-label">Size</span>
+                  <div className="editor-fill-options">
+                    {Object.entries(SIZE_PRESETS).map(([key, p]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={exportSizePreset === key ? 'active' : ''}
+                        onClick={() => setExportSizePreset(key)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="editor-fill-label">Rename (optional)</span>
+                  <input
+                    type="text"
+                    className="editor-preset-input"
+                    placeholder="e.g. moonrise-floral"
+                    value={exportRename}
+                    onChange={(e) => setExportRename(e.target.value)}
+                  />
+                  <button type="button" onClick={handleExport} disabled={exporting} className="export-go-button">
+                    {exporting
+                      ? `Exporting ${exportProgress ? `${exportProgress.done}/${exportProgress.total}` : ''}…`
+                      : 'Download zip'}
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="preset-picker-wrap">
+              <button type="button" disabled={selectedCount < 2} onClick={() => setShowCollagePanel((v) => !v)}>
+                Make collage
+              </button>
+              {showCollagePanel && (
+                <div className="preset-picker export-panel">
+                  <span className="editor-fill-label">Grid</span>
+                  <div className="editor-fill-options">
+                    {GRID_OPTIONS.map((g) => (
+                      <button
+                        key={`${g.cols}x${g.rows}`}
+                        type="button"
+                        className={collageGrid.cols === g.cols && collageGrid.rows === g.rows ? 'active' : ''}
+                        onClick={() => setCollageGrid(g)}
+                      >
+                        {g.cols}×{g.rows}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="editor-hint">
+                    Uses the first {collageGrid.cols * collageGrid.rows} selected photos, in the order they appear above.
+                  </p>
+                  <button type="button" onClick={handleBuildCollage} disabled={buildingCollage} className="export-go-button">
+                    {buildingCollage ? 'Building…' : 'Download collage'}
+                  </button>
+                </div>
+              )}
+            </div>
             <button type="button" className="toolbar-danger" onClick={handleClearAll}>
               Clear all
             </button>
