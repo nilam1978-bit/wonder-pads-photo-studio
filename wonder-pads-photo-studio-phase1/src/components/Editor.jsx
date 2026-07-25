@@ -20,6 +20,7 @@ const HANDLE_HIT_RADIUS = 16; // px, generous so it's easy to grab on a phone
 const DEFAULT_ADJUSTMENTS = { brightness: 0, contrast: 0, saturation: 0 };
 const DEFAULT_FILL = { type: 'color', color: '#ffffff' };
 const WATERMARK_CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+const COMPOSED_TABS = ['text', 'touchup'];
 
 function makeTextId() {
   return `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -73,6 +74,10 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   const [textLayers, setTextLayers] = useState(initial.textLayers || []);
   const [selectedTextId, setSelectedTextId] = useState(null);
   const [watermark, setWatermark] = useState(initial.watermark || DEFAULT_WATERMARK);
+  const [brushStrokes, setBrushStrokes] = useState(initial.brushStrokes || []);
+  const [brushTool, setBrushTool] = useState('blur');
+  const [brushSize, setBrushSize] = useState(0.06);
+  const [currentStroke, setCurrentStroke] = useState(null);
   const [saving, setSaving] = useState(false);
   const [presetNameInput, setPresetNameInput] = useState('');
   const [showPresetSave, setShowPresetSave] = useState(false);
@@ -120,6 +125,11 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   const resolvedWatermark = useMemo(
     () => (watermark.enabled && logoCanvas ? { ...watermark, logoCanvas } : watermark),
     [watermark, logoCanvas]
+  );
+
+  const allBrushStrokes = useMemo(
+    () => (currentStroke ? [...brushStrokes, currentStroke] : brushStrokes),
+    [brushStrokes, currentStroke]
   );
 
   const applyRatio = useCallback(
@@ -175,9 +185,9 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   const handleSavePreset = () => {
     const name = presetNameInput.trim();
     if (!name) return;
-    // Presets deliberately don't capture background-removal, text, or
-    // watermark state — those are per-photo specifics (or an expensive
-    // AI step), not a lightweight reusable "look".
+    // Presets deliberately don't capture background-removal, text,
+    // watermark, or brush touch-up state — those are per-photo specifics
+    // (or an expensive AI step), not a lightweight reusable "look".
     onAddPreset(name, { mode, ratioKey, fitFill, adjustments });
     setPresetNameInput('');
     setShowPresetSave(false);
@@ -195,6 +205,8 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     setTextLayers([]);
     setSelectedTextId(null);
     setWatermark(DEFAULT_WATERMARK);
+    setBrushStrokes([]);
+    setCurrentStroke(null);
     onReset(image.id);
   };
 
@@ -347,10 +359,10 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     );
   }, [drawSource, resolvedFill, adjustments, getFitBoxSize, removeBackground, checkEdges]);
 
-  // ---- Text-tab: shows the fully composed result (whatever framing is
-  // currently set) with draggable text + watermark on top. This is the
-  // ONLY view that shares the exact output coordinate space, which is
-  // why text placement lives here rather than on the crop/fit canvases. ----
+  // ---- Composed-view tabs (Text & logo / Touch-up): both show the fully
+  // composed result (whatever framing is currently set), since that's the
+  // only view whose coordinates match the real output. Text dragging and
+  // brush painting both happen here. ----
   const getOutputBoxSize = useCallback(() => {
     const longEdge = 380;
     let aspect = 1;
@@ -364,7 +376,7 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
       : { w: Math.round(longEdge * aspect), h: longEdge };
   }, [mode, crop, ratioKey, drawSource]);
 
-  const drawTextPreview = useCallback(() => {
+  const drawComposedPreview = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !drawSource) return;
     const { w, h } = getOutputBoxSize();
@@ -378,13 +390,14 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
       fitFill: resolvedFill,
       adjustments,
       removeBackground,
+      brushStrokes: allBrushStrokes,
       textLayers,
       watermark: resolvedWatermark,
     };
-    drawEdit(ctx, drawSource, drawSource.width, drawSource.height, previewEditState, w, h);
+    drawEdit(ctx, drawSource, drawSource.width, drawSource.height, previewEditState, w, h, sourceCanvas);
     textBoundsRef.current = measureTextLayers(ctx, textLayers, w, h);
 
-    if (selectedTextId) {
+    if (activeTab === 'text' && selectedTextId) {
       const b = textBoundsRef.current.find((bb) => bb.id === selectedTextId);
       if (b) {
         ctx.save();
@@ -395,13 +408,28 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
         ctx.restore();
       }
     }
-  }, [drawSource, mode, ratioKey, crop, resolvedFill, adjustments, removeBackground, textLayers, resolvedWatermark, selectedTextId, getOutputBoxSize]);
+  }, [
+    drawSource,
+    sourceCanvas,
+    mode,
+    ratioKey,
+    crop,
+    resolvedFill,
+    adjustments,
+    removeBackground,
+    allBrushStrokes,
+    textLayers,
+    resolvedWatermark,
+    activeTab,
+    selectedTextId,
+    getOutputBoxSize,
+  ]);
 
   useEffect(() => {
     if (activeTab === 'crop') drawCropPreview();
     else if (activeTab === 'fit') drawFitPreview();
-    else drawTextPreview();
-  }, [activeTab, drawCropPreview, drawFitPreview, drawTextPreview]);
+    else drawComposedPreview();
+  }, [activeTab, drawCropPreview, drawFitPreview, drawComposedPreview]);
 
   // ---- Pointer interaction: crop-mode move/resize ----
   const toImageCoords = useCallback(
@@ -606,9 +634,51 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     };
   }, []);
 
+  // ---- Touch-up tab: freehand brush painting ----
+  const canvasLocalPoint = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX / canvas.width,
+      y: (e.clientY - rect.top) * scaleY / canvas.height,
+    };
+  };
+
+  const handleBrushPointerDown = (e) => {
+    const point = canvasLocalPoint(e);
+    setCurrentStroke({ tool: brushTool, brushSize, points: [point] });
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!currentStroke) return;
+      const point = canvasLocalPoint(e);
+      setCurrentStroke((prev) => (prev ? { ...prev, points: [...prev.points, point] } : prev));
+    };
+    const handleUp = () => {
+      setCurrentStroke((prev) => {
+        if (prev) setBrushStrokes((strokes) => [...strokes, prev]);
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStroke]);
+
+  const undoLastStroke = () => setBrushStrokes((prev) => prev.slice(0, -1));
+  const clearStrokes = () => setBrushStrokes([]);
+
   const handleCanvasPointerDown = (e) => {
     if (activeTab === 'crop') handleCropPointerDown(e);
     else if (activeTab === 'fit') handleFitClick(e);
+    else if (activeTab === 'touchup') handleBrushPointerDown(e);
     else handleTextPointerDown(e);
   };
 
@@ -621,7 +691,17 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   // library thumbnail, and downloads a copy to your device ----
   const handleSave = async () => {
     setSaving(true);
-    const editState = { mode, ratioKey, crop, fitFill, adjustments, removeBackground, textLayers, watermark };
+    const editState = {
+      mode,
+      ratioKey,
+      crop,
+      fitFill,
+      adjustments,
+      removeBackground,
+      brushStrokes,
+      textLayers,
+      watermark,
+    };
     const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas, logoCanvas);
     const newThumbUrl = await makeThumbFromCanvas(outCanvas);
 
@@ -643,7 +723,8 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     );
   }
 
-  const showFillOptions = activeTab === 'fit' || (activeTab !== 'text' && removeBackground);
+  const isComposedTab = COMPOSED_TABS.includes(activeTab);
+  const showFillOptions = activeTab === 'fit' || (!isComposedTab && removeBackground);
 
   return (
     <div className="editor">
@@ -708,17 +789,20 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
         <button type="button" className={activeTab === 'text' ? 'active' : ''} onClick={() => handleTabChange('text')}>
           Text &amp; logo
         </button>
+        <button type="button" className={activeTab === 'touchup' ? 'active' : ''} onClick={() => handleTabChange('touchup')}>
+          Touch-up
+        </button>
       </div>
 
       <div className="editor-canvas-wrap">
         <canvas
           ref={canvasRef}
           onPointerDown={handleCanvasPointerDown}
-          className={eyedropperActive ? 'editor-canvas eyedropper' : 'editor-canvas'}
+          className={`editor-canvas ${eyedropperActive ? 'eyedropper' : ''} ${activeTab === 'touchup' ? 'brushing' : ''}`}
         />
       </div>
 
-      {activeTab !== 'text' && (
+      {!isComposedTab && (
         <div className="editor-ratios">
           {ratioButtonsForMode(activeTab).map((key) => (
             <button
@@ -919,7 +1003,51 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
         </div>
       )}
 
-      {activeTab !== 'text' && (
+      {activeTab === 'touchup' && (
+        <div className="editor-touchup-panel">
+          <div className="editor-fill-options">
+            <button type="button" className={brushTool === 'blur' ? 'active' : ''} onClick={() => setBrushTool('blur')}>
+              Blur
+            </button>
+            {removeBackground && (
+              <>
+                <button type="button" className={brushTool === 'erase' ? 'active' : ''} onClick={() => setBrushTool('erase')}>
+                  Erase leftover bit
+                </button>
+                <button type="button" className={brushTool === 'restore' ? 'active' : ''} onClick={() => setBrushTool('restore')}>
+                  Restore original
+                </button>
+              </>
+            )}
+          </div>
+          <label className="editor-slider">
+            <span>Brush size</span>
+            <input
+              type="range"
+              min={2}
+              max={20}
+              value={Math.round(brushSize * 100)}
+              onChange={(e) => setBrushSize(Number(e.target.value) / 100)}
+            />
+            <span className="editor-slider-value">{Math.round(brushSize * 100)}%</span>
+          </label>
+          <div className="editor-fill-options">
+            <button type="button" onClick={undoLastStroke} disabled={brushStrokes.length === 0}>
+              Undo last stroke
+            </button>
+            <button type="button" onClick={clearStrokes} disabled={brushStrokes.length === 0}>
+              Clear touch-ups
+            </button>
+          </div>
+          <p className="editor-hint">
+            {brushTool === 'blur' && 'Drag over a distracting detail to soften it.'}
+            {brushTool === 'erase' && 'Drag over a leftover background bit to remove it.'}
+            {brushTool === 'restore' && 'Drag over a part of the subject the AI wrongly removed.'}
+          </p>
+        </div>
+      )}
+
+      {!isComposedTab && (
         <div className="editor-adjustments">
           <div className="editor-adjustments-header">
             <span className="editor-fill-label">Adjustments</span>
