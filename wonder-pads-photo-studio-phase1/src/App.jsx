@@ -7,6 +7,8 @@ import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from './utils/exp
 import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
 import { buildCollage } from './utils/collage';
 import { removeBackgroundFromFile } from './utils/removeBackground';
+import { useTextPresets } from './hooks/useTextPresets';
+import TextTagPicker from './components/TextTagPicker';
 import Editor from './components/Editor';
 import './App.css';
 
@@ -41,6 +43,7 @@ function App() {
   } = useLibrary();
   const { presets, addPreset } = usePresets();
   const { logoCanvas, setLogoFile } = useWatermark();
+  const { categories: tagCategories, addChip: addTagChip } = useTextPresets();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -49,6 +52,9 @@ function App() {
   const [applyingWatermark, setApplyingWatermark] = useState(false);
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
   const [bgBatchProgress, setBgBatchProgress] = useState(null);
+  const [showTagPicker, setShowTagPicker] = useState(false);
+  const [selectedTagChips, setSelectedTagChips] = useState([]);
+  const [applyingTagChips, setApplyingTagChips] = useState(false);
 
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [exportFormat, setExportFormat] = useState('jpeg');
@@ -216,6 +222,42 @@ function App() {
     });
   };
 
+  // Builds one label from whichever tag chips are selected (e.g. "7in ·
+  // Liner · Cotton Topper") and adds it as a new text layer to every
+  // selected photo — on top of whatever text those photos already have,
+  // not replacing it. Each photo can still be opened afterward to tweak
+  // that one layer's wording for anything that doesn't quite fit (not
+  // every liner in the batch is organic cotton, etc).
+  const handleApplyTagChips = async () => {
+    const targets = images.filter((img) => img.selected);
+    if (targets.length === 0 || selectedTagChips.length === 0) return;
+    setApplyingTagChips(true);
+    const text = selectedTagChips.join(' · ');
+    for (const img of targets) {
+      const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
+      const newLayer = {
+        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        text,
+        x: 0.5,
+        y: 0.82,
+        fontSizeFrac: 0.07,
+        color: '#ffffff',
+        bgColor: null,
+      };
+      const editState = { ...base, textLayers: [...(base.textLayers || []), newLayer] };
+      const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
+      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+      saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+    }
+    setApplyingTagChips(false);
+    setSelectedTagChips([]);
+    setShowTagPicker(false);
+  };
+
+  const toggleTagChip = (chip) => {
+    setSelectedTagChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]));
+  };
+
   const editingImage = images.find((img) => img.id === editingId);
 
   if (editingImage) {
@@ -228,6 +270,8 @@ function App() {
         onReset={resetImage}
         logoCanvas={logoCanvas}
         onSetLogo={setLogoFile}
+        tagCategories={tagCategories}
+        onAddTagChip={addTagChip}
         onClose={() => setEditingId(null)}
         onSave={(id, editState, newThumbUrl, status) => {
           saveEdit(id, editState, newThumbUrl, status);
@@ -322,6 +366,24 @@ function App() {
             >
               {applyingWatermark ? 'Stamping…' : 'Add watermark'}
             </button>
+            <div className="preset-picker-wrap">
+              <button type="button" disabled={selectedCount === 0} onClick={() => setShowTagPicker((v) => !v)}>
+                Add text tag
+              </button>
+              {showTagPicker && (
+                <div className="preset-picker export-panel">
+                  <TextTagPicker
+                    categories={tagCategories}
+                    onAddChip={addTagChip}
+                    selected={selectedTagChips}
+                    onToggle={toggleTagChip}
+                    onApply={handleApplyTagChips}
+                    applying={applyingTagChips}
+                    applyLabel="Apply to selected"
+                  />
+                </div>
+              )}
+            </div>
             <div className="preset-picker-wrap">
               <button type="button" disabled={selectedCount === 0} onClick={() => setShowExportPanel((v) => !v)}>
                 Export
