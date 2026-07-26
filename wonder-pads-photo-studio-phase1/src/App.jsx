@@ -53,7 +53,6 @@ function App() {
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
   const [bgBatchProgress, setBgBatchProgress] = useState(null);
   const [showTagPicker, setShowTagPicker] = useState(false);
-  const [selectedTagChips, setSelectedTagChips] = useState([]);
   const [applyingTagChips, setApplyingTagChips] = useState(false);
 
   const [showExportPanel, setShowExportPanel] = useState(false);
@@ -222,22 +221,21 @@ function App() {
     });
   };
 
-  // Builds one label from whichever tag chips are selected (e.g. "7in ·
-  // Liner · Cotton Topper") and adds it as a new text layer to every
+  // Tapping a tag immediately adds it as a new text layer to every
   // selected photo — on top of whatever text those photos already have,
   // not replacing it. Each photo can still be opened afterward to tweak
   // that one layer's wording for anything that doesn't quite fit (not
-  // every liner in the batch is organic cotton, etc).
-  const handleApplyTagChips = async () => {
+  // every liner in the batch is organic cotton, etc). Tap several tags
+  // in a row (e.g. "7in", then "Liner") to stack up multiple labels.
+  const handleApplyTagChip = async (chip) => {
     const targets = images.filter((img) => img.selected);
-    if (targets.length === 0 || selectedTagChips.length === 0) return;
+    if (targets.length === 0) return;
     setApplyingTagChips(true);
-    const text = selectedTagChips.join(' · ');
     for (const img of targets) {
       const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
       const newLayer = {
         id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        text,
+        text: chip,
         x: 0.5,
         y: 0.82,
         fontSizeFrac: 0.07,
@@ -250,12 +248,6 @@ function App() {
       saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
     }
     setApplyingTagChips(false);
-    setSelectedTagChips([]);
-    setShowTagPicker(false);
-  };
-
-  const toggleTagChip = (chip) => {
-    setSelectedTagChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]));
   };
 
   const editingImage = images.find((img) => img.id === editingId);
@@ -372,15 +364,14 @@ function App() {
               </button>
               {showTagPicker && (
                 <div className="preset-picker export-panel">
+                  <p className="editor-hint">Tap a tag to stamp it onto every selected photo right away.</p>
                   <TextTagPicker
                     categories={tagCategories}
                     onAddChip={addTagChip}
-                    selected={selectedTagChips}
-                    onToggle={toggleTagChip}
-                    onApply={handleApplyTagChips}
-                    applying={applyingTagChips}
-                    applyLabel="Apply to selected"
+                    onPick={handleApplyTagChip}
+                    disabled={applyingTagChips}
                   />
+                  {applyingTagChips && <p className="preset-picker-status">Applying…</p>}
                 </div>
               )}
             </div>
