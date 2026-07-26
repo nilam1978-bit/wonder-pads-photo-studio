@@ -12,6 +12,7 @@ import { loadImageCanvas } from '../utils/loadImageCanvas';
 import { computeAutoEnhance } from '../utils/autoEnhance';
 import { removeBackgroundFromFile } from '../utils/removeBackground';
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from '../utils/exportImage';
+import TextTagPicker from './TextTagPicker';
 import './Editor.css';
 
 const CROP_BOX = 380; // fixed square preview box used while in Crop mode
@@ -58,7 +59,19 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
   return { x, y, width, height };
 }
 
-export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, presets, onAddPreset, logoCanvas, onSetLogo }) {
+export default function Editor({
+  image,
+  onClose,
+  onSave,
+  onReset,
+  onBgRemoved,
+  presets,
+  onAddPreset,
+  logoCanvas,
+  onSetLogo,
+  tagCategories,
+  onAddTagChip,
+}) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
   const [mode, setMode] = useState(initial.mode || 'crop');
@@ -211,10 +224,10 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
   };
 
   // ---- Text layers ----
-  const addTextLayer = () => {
+  const addTextLayer = (initialText = 'Your text') => {
     const layer = {
       id: makeTextId(),
-      text: 'Your text',
+      text: initialText,
       x: 0.5,
       y: 0.5,
       fontSizeFrac: 0.08,
@@ -224,6 +237,16 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
     setTextLayers((prev) => [...prev, layer]);
     setSelectedTextId(layer.id);
     setActiveTab('text');
+  };
+
+  const [selectedTagChips, setSelectedTagChips] = useState([]);
+  const toggleTagChip = (chip) => {
+    setSelectedTagChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]));
+  };
+  const applyTagChipsAsText = () => {
+    if (selectedTagChips.length === 0) return;
+    addTextLayer(selectedTagChips.join(' · '));
+    setSelectedTagChips([]);
   };
 
   const updateTextLayer = (id, patch) => {
@@ -870,9 +893,23 @@ export default function Editor({ image, onClose, onSave, onReset, onBgRemoved, p
 
       {activeTab === 'text' && (
         <div className="editor-text-panel">
-          <button type="button" onClick={addTextLayer}>
+          <button type="button" onClick={() => addTextLayer()}>
             + Add text
           </button>
+
+          {tagCategories && (
+            <div className="editor-text-controls">
+              <span className="editor-fill-label">Or quick-add from tags:</span>
+              <TextTagPicker
+                categories={tagCategories}
+                onAddChip={onAddTagChip}
+                selected={selectedTagChips}
+                onToggle={toggleTagChip}
+                onApply={applyTagChipsAsText}
+                applyLabel="Insert as text"
+              />
+            </div>
+          )}
 
           {textLayers.length > 0 && (
             <div className="editor-fill-options">
