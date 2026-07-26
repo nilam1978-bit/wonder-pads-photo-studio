@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function TextTagPicker({ categories, onAddChip, selected, onToggle, onApply, applyLabel, applying }) {
+export default function TextTagPicker({ categories, onAddChip, onPick, disabled }) {
   const [customInputs, setCustomInputs] = useState({});
 
   const handleAddCustom = (category) => {
@@ -16,12 +16,7 @@ export default function TextTagPicker({ categories, onAddChip, selected, onToggl
           <span className="editor-fill-label">{category}</span>
           <div className="editor-fill-options">
             {chips.map((chip) => (
-              <button
-                key={chip}
-                type="button"
-                className={selected.includes(chip) ? 'active' : ''}
-                onClick={() => onToggle(chip)}
-              >
+              <button key={chip} type="button" disabled={disabled} onClick={() => onPick(chip)}>
                 {chip}
               </button>
             ))}
@@ -38,10 +33,6 @@ export default function TextTagPicker({ categories, onAddChip, selected, onToggl
           </div>
         </div>
       ))}
-      {selected.length > 0 && <p className="editor-hint">Preview: {selected.join(' · ')}</p>}
-      <button type="button" onClick={onApply} disabled={selected.length === 0 || applying} className="export-go-button">
-        {applying ? 'Applying…' : applyLabel}
-      </button>
     </div>
   );
 }
