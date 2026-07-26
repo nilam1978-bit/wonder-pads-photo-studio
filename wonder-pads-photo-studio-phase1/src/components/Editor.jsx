@@ -239,15 +239,7 @@ export default function Editor({
     setActiveTab('text');
   };
 
-  const [selectedTagChips, setSelectedTagChips] = useState([]);
-  const toggleTagChip = (chip) => {
-    setSelectedTagChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]));
-  };
-  const applyTagChipsAsText = () => {
-    if (selectedTagChips.length === 0) return;
-    addTextLayer(selectedTagChips.join(' · '));
-    setSelectedTagChips([]);
-  };
+  const pickTagAsText = (chip) => addTextLayer(chip);
 
   const updateTextLayer = (id, patch) => {
     setTextLayers((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -899,15 +891,8 @@ export default function Editor({
 
           {tagCategories && (
             <div className="editor-text-controls">
-              <span className="editor-fill-label">Or quick-add from tags:</span>
-              <TextTagPicker
-                categories={tagCategories}
-                onAddChip={onAddTagChip}
-                selected={selectedTagChips}
-                onToggle={toggleTagChip}
-                onApply={applyTagChipsAsText}
-                applyLabel="Insert as text"
-              />
+              <span className="editor-fill-label">Or tap a tag to add it straight onto the photo:</span>
+              <TextTagPicker categories={tagCategories} onAddChip={onAddTagChip} onPick={pickTagAsText} />
             </div>
           )}
 
