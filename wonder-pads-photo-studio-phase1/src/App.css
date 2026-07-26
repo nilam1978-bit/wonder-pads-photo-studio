@@ -233,3 +233,23 @@
   margin: 4px 0;
   display: block;
 }
+
+.tagpicker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tagpicker-category {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tagpicker-add-input {
+  border: 1px dashed #ccc;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  width: 70px;
+}
