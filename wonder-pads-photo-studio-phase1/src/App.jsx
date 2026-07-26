@@ -6,6 +6,7 @@ import { RATIOS, DEFAULT_LOOK_EDIT_STATE, computeCenteredCrop } from './utils/re
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from './utils/exportImage';
 import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
 import { buildCollage } from './utils/collage';
+import { removeBackgroundFromFile } from './utils/removeBackground';
 import Editor from './components/Editor';
 import './App.css';
 
@@ -46,6 +47,8 @@ function App() {
   const [showPresetPicker, setShowPresetPicker] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
   const [applyingWatermark, setApplyingWatermark] = useState(false);
+  const [removingBgBatch, setRemovingBgBatch] = useState(false);
+  const [bgBatchProgress, setBgBatchProgress] = useState(null);
 
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [exportFormat, setExportFormat] = useState('jpeg');
@@ -57,6 +60,8 @@ function App() {
   const [showCollagePanel, setShowCollagePanel] = useState(false);
   const [collageGrid, setCollageGrid] = useState(GRID_OPTIONS[3]);
   const [buildingCollage, setBuildingCollage] = useState(false);
+  const [collagePreviewUrl, setCollagePreviewUrl] = useState(null);
+  const collageCanvasRef = useRef(null);
 
   const fileInputRef = useRef(null);
 
@@ -125,6 +130,35 @@ function App() {
     setApplyingWatermark(false);
   };
 
+  // Runs AI background removal on every selected photo that doesn't
+  // already have a cached cutout, then turns "remove background" on for
+  // each — keeping whatever crop/fill/adjustments they already have.
+  // Photos are processed one at a time (not all at once), same reasoning
+  // as everywhere else in the app: a big batch shouldn't freeze the tab.
+  const handleBatchRemoveBackground = async () => {
+    const targets = images.filter((img) => img.selected);
+    if (targets.length === 0) return;
+    setRemovingBgBatch(true);
+    setBgBatchProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      const img = targets[i];
+      try {
+        const cutout = img.bgRemovedCanvas || (await removeBackgroundFromFile(img.file));
+        if (!img.bgRemovedCanvas) setBgRemovedCanvas(img.id, cutout);
+        const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
+        const editState = { ...base, removeBackground: true };
+        const outCanvas = await renderFullEdit(img.file, editState, cutout, logoCanvas);
+        const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+        saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+      } catch (err) {
+        console.error(`Background removal failed for "${img.fileName}"`, err);
+      }
+      setBgBatchProgress({ done: i + 1, total: targets.length });
+    }
+    setRemovingBgBatch(false);
+    setBgBatchProgress(null);
+  };
+
   // Renders every selected photo at the chosen format/size (renamed by
   // pattern if given) and bundles them into one zip download. Every photo
   // that passes through this — even ones you never opened in the Editor —
@@ -150,18 +184,36 @@ function App() {
     setExportProgress(null);
   };
 
-  const handleBuildCollage = async () => {
+  // Builds the collage and shows it before anything downloads, so you can
+  // actually check the arrangement looks right first.
+  const handlePreviewCollage = async () => {
     const targets = images.filter((img) => img.selected);
     if (targets.length < 2) return;
     setBuildingCollage(true);
     try {
       const canvas = await buildCollage(targets, collageGrid.cols, collageGrid.rows, { logoCanvas });
-      downloadCanvas(canvas, 'wonder-pads-collage.jpg');
-      setShowCollagePanel(false);
+      collageCanvasRef.current = canvas;
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      setCollagePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(blob);
+      });
     } catch (err) {
       console.error('Collage failed', err);
     }
     setBuildingCollage(false);
+  };
+
+  const handleDownloadCollage = () => {
+    if (collageCanvasRef.current) downloadCanvas(collageCanvasRef.current, 'wonder-pads-collage.jpg');
+  };
+
+  const handleCollageGridChange = (g) => {
+    setCollageGrid(g);
+    setCollagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   };
 
   const editingImage = images.find((img) => img.id === editingId);
@@ -254,6 +306,16 @@ function App() {
             </div>
             <button
               type="button"
+              disabled={selectedCount === 0 || removingBgBatch}
+              onClick={handleBatchRemoveBackground}
+              title="Runs AI background removal on every selected photo"
+            >
+              {removingBgBatch
+                ? `Removing ${bgBatchProgress ? `${bgBatchProgress.done}/${bgBatchProgress.total}` : ''}…`
+                : 'Remove background (all)'}
+            </button>
+            <button
+              type="button"
               disabled={selectedCount === 0 || !logoCanvas || applyingWatermark}
               title={!logoCanvas ? "Upload your logo from any photo's editor first" : ''}
               onClick={handleApplyWatermark}
@@ -316,7 +378,7 @@ function App() {
                         key={`${g.cols}x${g.rows}`}
                         type="button"
                         className={collageGrid.cols === g.cols && collageGrid.rows === g.rows ? 'active' : ''}
-                        onClick={() => setCollageGrid(g)}
+                        onClick={() => handleCollageGridChange(g)}
                       >
                         {g.cols}×{g.rows}
                       </button>
@@ -325,9 +387,23 @@ function App() {
                   <p className="editor-hint">
                     Uses the first {collageGrid.cols * collageGrid.rows} selected photos, in the order they appear above.
                   </p>
-                  <button type="button" onClick={handleBuildCollage} disabled={buildingCollage} className="export-go-button">
-                    {buildingCollage ? 'Building…' : 'Download collage'}
-                  </button>
+                  {collagePreviewUrl && (
+                    <img src={collagePreviewUrl} alt="Collage preview" className="collage-preview" />
+                  )}
+                  {collagePreviewUrl ? (
+                    <>
+                      <button type="button" onClick={handleDownloadCollage} className="export-go-button">
+                        Download collage
+                      </button>
+                      <button type="button" onClick={handlePreviewCollage} disabled={buildingCollage}>
+                        {buildingCollage ? 'Rebuilding…' : 'Rebuild preview'}
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={handlePreviewCollage} disabled={buildingCollage} className="export-go-button">
+                      {buildingCollage ? 'Building…' : 'Preview collage'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
