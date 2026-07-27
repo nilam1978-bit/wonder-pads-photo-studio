@@ -231,23 +231,32 @@ function App() {
     const targets = images.filter((img) => img.selected);
     if (targets.length === 0) return;
     setApplyingTagChips(true);
+    let failCount = 0;
     for (const img of targets) {
-      const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
-      const newLayer = {
-        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        text: chip,
-        x: 0.5,
-        y: 0.82,
-        fontSizeFrac: 0.07,
-        color: '#ffffff',
-        bgColor: null,
-      };
-      const editState = { ...base, textLayers: [...(base.textLayers || []), newLayer] };
-      const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
-      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
-      saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+      try {
+        const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
+        const newLayer = {
+          id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          text: chip,
+          x: 0.5,
+          y: 0.82,
+          fontSizeFrac: 0.07,
+          color: '#ffffff',
+          bgColor: 'rgba(0,0,0,0.55)',
+        };
+        const editState = { ...base, textLayers: [...(base.textLayers || []), newLayer] };
+        const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
+        const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+        saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+      } catch (err) {
+        failCount += 1;
+        console.error(`Adding "${chip}" failed for "${img.fileName}"`, err);
+      }
     }
     setApplyingTagChips(false);
+    if (failCount > 0) {
+      alert(`"${chip}" didn't apply to ${failCount} of ${targets.length} photos — check the browser console for details.`);
+    }
   };
 
   const editingImage = images.find((img) => img.id === editingId);
