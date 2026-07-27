@@ -224,7 +224,7 @@ export default function Editor({
   };
 
   // ---- Text layers ----
-  const addTextLayer = (initialText = 'Your text') => {
+  const addTextLayer = (initialText = 'Your text', styleOverrides = {}) => {
     const layer = {
       id: makeTextId(),
       text: initialText,
@@ -233,13 +233,14 @@ export default function Editor({
       fontSizeFrac: 0.08,
       color: '#ffffff',
       bgColor: null,
+      ...styleOverrides,
     };
     setTextLayers((prev) => [...prev, layer]);
     setSelectedTextId(layer.id);
     setActiveTab('text');
   };
 
-  const pickTagAsText = (chip) => addTextLayer(chip);
+  const pickTagAsText = (chip) => addTextLayer(chip, { y: 0.82, fontSizeFrac: 0.07, bgColor: 'rgba(0,0,0,0.55)' });
 
   const updateTextLayer = (id, patch) => {
     setTextLayers((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
