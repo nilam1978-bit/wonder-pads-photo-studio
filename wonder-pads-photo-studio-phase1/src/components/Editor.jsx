@@ -63,10 +63,10 @@ export default function Editor({
   image,
   onClose,
   onSave,
+  onApplyToSelected,
+  selectedCount,
   onReset,
   onBgRemoved,
-  presets,
-  onAddPreset,
   logoCanvas,
   onSetLogo,
   tagCategories,
@@ -92,8 +92,7 @@ export default function Editor({
   const [brushSize, setBrushSize] = useState(0.06);
   const [currentStroke, setCurrentStroke] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [presetNameInput, setPresetNameInput] = useState('');
-  const [showPresetSave, setShowPresetSave] = useState(false);
+  const [applyingToSelected, setApplyingToSelected] = useState(false);
   const [bgImageVersion, setBgImageVersion] = useState(0);
 
   const canvasRef = useRef(null);
@@ -182,28 +181,6 @@ export default function Editor({
       console.error('Background removal failed', err);
     }
     setRemovingBackground(false);
-  };
-
-  const applyPreset = (preset) => {
-    setMode(preset.look.mode);
-    setActiveTab(preset.look.mode);
-    setRatioKey(preset.look.ratioKey);
-    setFitFill(preset.look.fitFill);
-    setAdjustments(preset.look.adjustments || DEFAULT_ADJUSTMENTS);
-    if (preset.look.mode === 'crop' && drawSource) {
-      setCrop(computeCenteredCrop(drawSource.width, drawSource.height, RATIOS[preset.look.ratioKey]));
-    }
-  };
-
-  const handleSavePreset = () => {
-    const name = presetNameInput.trim();
-    if (!name) return;
-    // Presets deliberately don't capture background-removal, text,
-    // watermark, or brush touch-up state — those are per-photo specifics
-    // (or an expensive AI step), not a lightweight reusable "look".
-    onAddPreset(name, { mode, ratioKey, fitFill, adjustments });
-    setPresetNameInput('');
-    setShowPresetSave(false);
   };
 
   const handleReset = () => {
@@ -703,11 +680,7 @@ export default function Editor({
     if (file) onSetLogo(file);
   };
 
-  // ---- Save: renders the final edit at full resolution, updates the
-  // library thumbnail, and downloads a copy to your device ----
-  const handleSave = async () => {
-    setSaving(true);
-    const editState = {
+  const currentEditRecipe = () => ({
       mode,
       ratioKey,
       crop,
@@ -717,7 +690,13 @@ export default function Editor({
       brushStrokes,
       textLayers,
       watermark,
-    };
+  });
+
+  // ---- Save: renders the final edit at full resolution, updates the
+  // library thumbnail, and downloads a copy to your device ----
+  const handleSave = async () => {
+    setSaving(true);
+    const editState = currentEditRecipe();
     const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas, logoCanvas);
     const newThumbUrl = await makeThumbFromCanvas(outCanvas);
 
@@ -726,6 +705,20 @@ export default function Editor({
 
     onSave(image.id, editState, newThumbUrl, 'edited');
     setSaving(false);
+  };
+
+  const handleApplyToSelected = async () => {
+    if (!onApplyToSelected || selectedCount === 0) return;
+    setApplyingToSelected(true);
+    try {
+      await onApplyToSelected(image.id, currentEditRecipe());
+      onClose();
+    } catch (err) {
+      console.error('Could not apply this edit to the selected photos.', err);
+      window.alert('This edit could not be applied to every selected photo. Please try again.');
+    } finally {
+      setApplyingToSelected(false);
+    }
   };
 
   if (!sourceCanvas) {
@@ -753,19 +746,6 @@ export default function Editor({
           Reset
         </button>
       </div>
-
-      {presets.length > 0 && (
-        <div className="editor-preset-row">
-          <span className="editor-fill-label">Apply a saved preset:</span>
-          <div className="editor-fill-options">
-            {presets.map((p) => (
-              <button key={p.id} type="button" onClick={() => applyPreset(p)}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="editor-bg-row">
         <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>
@@ -1098,33 +1078,24 @@ export default function Editor({
         </div>
       )}
 
-      <div className="editor-preset-save">
-        {showPresetSave ? (
-          <div className="editor-fill-options">
-            <input
-              type="text"
-              placeholder="Preset name"
-              value={presetNameInput}
-              onChange={(e) => setPresetNameInput(e.target.value)}
-              className="editor-preset-input"
-            />
-            <button type="button" onClick={handleSavePreset}>
-              Save preset
-            </button>
-            <button type="button" onClick={() => setShowPresetSave(false)}>
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => setShowPresetSave(true)}>
-            Save this look as a preset
-          </button>
-        )}
+      <div className="editor-save-actions">
+        <button
+          type="button"
+          className="editor-apply-selected"
+          onClick={handleApplyToSelected}
+          disabled={applyingToSelected || saving || selectedCount === 0}
+        >
+          {applyingToSelected
+            ? 'Applying edit…'
+            : `Apply this edit to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
+        </button>
+        <p className="editor-hint">
+          Crop keeps the same ratio and makes a fresh centred crop for each photo. Fit keeps every photo uncropped.
+        </p>
+        <button type="button" className="editor-save" onClick={handleSave} disabled={saving || applyingToSelected}>
+          {saving ? 'Saving…' : 'Save & download this photo'}
+        </button>
       </div>
-
-      <button type="button" className="editor-save" onClick={handleSave} disabled={saving}>
-        {saving ? 'Saving…' : 'Save & download'}
-      </button>
     </div>
   );
 }
