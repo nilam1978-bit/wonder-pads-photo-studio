@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
-import { usePresets } from './hooks/usePresets';
 import { useWatermark } from './hooks/useWatermark';
-import { RATIOS, DEFAULT_LOOK_EDIT_STATE, computeCenteredCrop } from './utils/renderEdit';
+import { DEFAULT_LOOK_EDIT_STATE } from './utils/renderEdit';
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from './utils/exportImage';
+import { applyRecipeToPhoto, completeEditRecipe } from './utils/editRecipe';
 import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
 import { buildCollage } from './utils/collage';
 import { removeBackgroundFromFile } from './utils/removeBackground';
@@ -41,14 +41,11 @@ function App() {
     setBgRemovedCanvas,
     resetImage,
   } = useLibrary();
-  const { presets, addPreset } = usePresets();
   const { logoCanvas, setLogoFile } = useWatermark();
   const { categories: tagCategories, addChip: addTagChip } = useTextPresets();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [showPresetPicker, setShowPresetPicker] = useState(false);
-  const [applyingPreset, setApplyingPreset] = useState(false);
   const [applyingWatermark, setApplyingWatermark] = useState(false);
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
   const [bgBatchProgress, setBgBatchProgress] = useState(null);
@@ -98,25 +95,31 @@ function App() {
   // Applies a saved preset's look to every currently-selected photo, one
   // at a time. Updates each photo's thumbnail and status in the library —
   // it doesn't trigger a download for each one; use Export for that.
-  const handleApplyPreset = async (preset) => {
-    setApplyingPreset(true);
+  const handleApplyEditToSelected = async (sourceId, sourceEditState) => {
     const targets = images.filter((img) => img.selected);
-    for (const img of targets) {
-      let editState = {
-        mode: preset.look.mode,
-        ratioKey: preset.look.ratioKey,
-        fitFill: preset.look.fitFill,
-        adjustments: preset.look.adjustments,
-      };
-      if (preset.look.mode === 'crop') {
-        editState.crop = computeCenteredCrop(img.fullWidth, img.fullHeight, RATIOS[preset.look.ratioKey]);
+    if (targets.length === 0) return 0;
+    const sourcePhoto = images.find((img) => img.id === sourceId);
+    const photosToUpdate =
+      sourcePhoto && !sourcePhoto.selected ? [sourcePhoto, ...targets] : targets;
+
+    for (const img of photosToUpdate) {
+      const editState =
+        img.id === sourceId
+          ? completeEditRecipe(sourceEditState)
+          : applyRecipeToPhoto(sourceEditState, img);
+
+      let cutout = img.bgRemovedCanvas;
+      if (editState.removeBackground && !cutout) {
+        cutout = await removeBackgroundFromFile(img.file);
+        setBgRemovedCanvas(img.id, cutout);
       }
-      const outCanvas = await renderFullEdit(img.file, editState);
+
+      const outCanvas = await renderFullEdit(img.file, editState, cutout, logoCanvas);
       const newThumbUrl = await makeThumbFromCanvas(outCanvas);
-      saveEdit(img.id, editState, newThumbUrl, 'preset');
+      saveEdit(img.id, editState, newThumbUrl, 'edited');
     }
-    setApplyingPreset(false);
-    setShowPresetPicker(false);
+
+    return targets.length;
   };
 
   // Stamps the logo onto every selected photo, keeping whatever else is
@@ -265,8 +268,6 @@ function App() {
     return (
       <Editor
         image={editingImage}
-        presets={presets}
-        onAddPreset={addPreset}
         onBgRemoved={setBgRemovedCanvas}
         onReset={resetImage}
         logoCanvas={logoCanvas}
@@ -274,6 +275,8 @@ function App() {
         tagCategories={tagCategories}
         onAddTagChip={addTagChip}
         onClose={() => setEditingId(null)}
+        selectedCount={selectedCount}
+        onApplyToSelected={handleApplyEditToSelected}
         onSave={(id, editState, newThumbUrl, status) => {
           saveEdit(id, editState, newThumbUrl, status);
           setEditingId(null);
@@ -326,29 +329,6 @@ function App() {
             <button type="button" onClick={clearSelection} disabled={selectedCount === 0}>
               Clear
             </button>
-            <div className="preset-picker-wrap">
-              <button
-                type="button"
-                disabled={selectedCount === 0 || presets.length === 0}
-                title={presets.length === 0 ? 'Save a preset from the Editor first' : ''}
-                onClick={() => setShowPresetPicker((v) => !v)}
-              >
-                Apply preset
-              </button>
-              {showPresetPicker && (
-                <div className="preset-picker">
-                  {applyingPreset ? (
-                    <p className="preset-picker-status">Applying…</p>
-                  ) : (
-                    presets.map((p) => (
-                      <button key={p.id} type="button" onClick={() => handleApplyPreset(p)}>
-                        {p.name}
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
             <button
               type="button"
               disabled={selectedCount === 0 || removingBgBatch}
