@@ -299,3 +299,23 @@
   flex: 1;
   min-width: 120px;
 }
+.editor-save-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.editor-apply-selected {
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #6f4663;
+  color: #fffaf6;
+  font-weight: 800;
+}
+
+.editor-apply-selected:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
