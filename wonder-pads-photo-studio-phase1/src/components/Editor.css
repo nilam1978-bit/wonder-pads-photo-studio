@@ -319,3 +319,131 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Wonder Pads editor identity */
+.editor {
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  max-width: none;
+  min-height: 100vh;
+  padding: 20px clamp(12px, 3vw, 28px) 52px;
+  color: var(--wp-plum, #5b3a52);
+  font-family: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+}
+
+.editor-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--wp-thread, #ead7df);
+  background: rgba(255, 248, 243, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+.editor-back,
+.editor-reset {
+  color: var(--wp-plum, #5b3a52);
+}
+
+.editor-reset {
+  color: var(--wp-rose, #b85f7d);
+}
+
+.editor-bg-row,
+.editor-modes,
+.editor-ratios {
+  padding: 8px;
+  border: 1px solid var(--wp-thread, #ead7df);
+  border-radius: 13px;
+  background: var(--wp-card, #fffdfb);
+}
+
+.editor-bg-row button,
+.editor-modes button,
+.editor-ratios button,
+.editor-fill-options button,
+.editor-file-button {
+  background: #f7eff3;
+  color: var(--wp-plum, #5b3a52);
+}
+
+.editor-bg-row button.active,
+.editor-modes button.active,
+.editor-ratios button.active,
+.editor-fill-options button.active,
+.editor-file-button.active {
+  background: var(--wp-lilac, #ecd8e8);
+  color: var(--wp-plum, #5b3a52);
+  box-shadow: inset 0 0 0 1px var(--wp-lilac-deep, #cf9fc4);
+}
+
+.editor-canvas-wrap {
+  min-height: min(62vh, 620px);
+  align-items: center;
+  border: 1px solid var(--wp-thread, #ead7df);
+  border-radius: 20px;
+  background:
+    linear-gradient(45deg, rgba(91, 58, 82, 0.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(91, 58, 82, 0.035) 25%, transparent 25%),
+    #f8f2f5;
+  background-position: 0 0, 12px 12px;
+  background-size: 24px 24px;
+  box-shadow: 0 18px 48px rgba(91, 58, 82, 0.1);
+}
+
+.editor-canvas {
+  max-height: min(59vh, 580px);
+  box-shadow: 0 12px 30px rgba(57, 37, 51, 0.15);
+}
+
+.editor-fill,
+.editor-adjustments,
+.editor-text-panel,
+.editor-watermark-panel,
+.editor-touchup-panel {
+  border: 1px solid var(--wp-thread, #ead7df);
+  border-radius: 14px;
+  background: var(--wp-card, #fffdfb);
+}
+
+.editor-text-controls {
+  border: 1px solid #f0e4ea;
+  background: #fffafc;
+}
+
+.editor-hint {
+  color: var(--wp-plum-soft, #806a79);
+}
+
+.editor-apply-selected,
+.editor-save {
+  border: 0;
+  background: var(--wp-plum, #5b3a52);
+  color: var(--wp-cream, #fff8f3);
+  box-shadow: 0 8px 20px rgba(91, 58, 82, 0.18);
+}
+
+@media (max-width: 640px) {
+  .editor {
+    padding-top: 8px;
+  }
+
+  .editor-modes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .editor-modes button {
+    width: 100%;
+  }
+
+  .editor-canvas-wrap {
+    min-height: 48vh;
+  }
+
+  .editor-canvas {
+    max-height: 46vh;
+  }
+}
