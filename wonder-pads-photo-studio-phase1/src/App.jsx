@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
 import { useWatermark } from './hooks/useWatermark';
 import { DEFAULT_LOOK_EDIT_STATE } from './utils/renderEdit';
@@ -52,6 +52,7 @@ function App() {
   } = useTextPresets();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [activeId, setActiveId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [applyingWatermark, setApplyingWatermark] = useState(false);
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
@@ -73,6 +74,14 @@ function App() {
   const collageCanvasRef = useRef(null);
 
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (images.length === 0) {
+      setActiveId(null);
+      return;
+    }
+    if (!images.some((image) => image.id === activeId)) setActiveId(images[0].id);
+  }, [images, activeId]);
 
   const handleFileInput = useCallback(
     (e) => {
@@ -97,6 +106,13 @@ function App() {
       `Remove all ${images.length} photo${images.length === 1 ? '' : 's'} from the library? Anything you haven't downloaded yet will be lost.`
     );
     if (ok) clearAll();
+  };
+
+  const handleRemoveImage = (id) => {
+    const currentIndex = images.findIndex((image) => image.id === id);
+    const nextActive = images[currentIndex + 1] || images[currentIndex - 1] || null;
+    removeImage(id);
+    if (activeId === id) setActiveId(nextActive?.id || null);
   };
 
   // Applies a saved preset's look to every currently-selected photo, one
@@ -274,6 +290,7 @@ function App() {
   const handleApplyTextBlock = (block) =>
     handleApplyTextToSelected(block.text, { y: 0.72, fontSizeFrac: 0.055 });
 
+  const activeImage = images.find((img) => img.id === activeId) || images[0] || null;
   const editingImage = images.find((img) => img.id === editingId);
 
   if (editingImage) {
@@ -303,12 +320,21 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Wonder Pads Photo Studio</h1>
-        <p className="app-subtitle">Upload, then build your edits — batch or one at a time.</p>
+        <div className="brand-mark" aria-hidden="true">WP</div>
+        <div>
+          <p className="brand-eyebrow">Wonder Pads Reusables</p>
+          <h1>Photo Studio</h1>
+          <p className="app-subtitle">Prepare beautiful product photos, one thoughtful step at a time.</p>
+        </div>
+        {images.length > 0 && (
+          <button type="button" className="header-add" onClick={() => fileInputRef.current?.click()}>
+            + Add photos
+          </button>
+        )}
       </header>
 
       <section
-        className={`dropzone ${isDraggingOver ? 'dropzone--active' : ''}`}
+        className={`dropzone ${images.length > 0 ? 'dropzone--compact' : ''} ${isDraggingOver ? 'dropzone--active' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDraggingOver(true);
@@ -316,10 +342,18 @@ function App() {
         onDragLeave={() => setIsDraggingOver(false)}
         onDrop={handleDrop}
       >
-        <p>Drag photos here, or</p>
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
-          Add photos
-        </button>
+        {images.length === 0 ? (
+          <>
+            <span className="dropzone-icon" aria-hidden="true">✦</span>
+            <h2>Bring in your product photos</h2>
+            <p>Select one photo or a whole batch. Originals always stay untouched.</p>
+            <button type="button" onClick={() => fileInputRef.current?.click()}>
+              Choose photos
+            </button>
+          </>
+        ) : (
+          <p>Drop more photos anywhere in this area</p>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -478,44 +512,78 @@ function App() {
         </div>
       )}
 
-      {images.length === 0 ? (
-        <p className="empty-state">No photos yet — add some to get started.</p>
-      ) : (
-        <div className="grid">
-          {images.map((img) => (
-            <div
-              key={img.id}
-              className={`thumb ${img.selected ? 'thumb--selected' : ''}`}
-              onClick={() => setEditingId(img.id)}
-            >
-              <img src={img.thumbUrl} alt={img.fileName} />
-              <button
-                type="button"
-                className={`thumb-check ${img.selected ? 'thumb-check--on' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleSelect(img.id);
-                }}
-                aria-label={img.selected ? `Deselect ${img.fileName}` : `Select ${img.fileName}`}
-              >
-                {img.selected ? '✓' : ''}
-              </button>
-              <button
-                type="button"
-                className="thumb-remove"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeImage(img.id);
-                }}
-                aria-label={`Remove ${img.fileName}`}
-              >
-                ×
-              </button>
-              <span className="thumb-name">
-                {img.fileName} · {STATUS_LABELS[img.status]}
+      {activeImage && (
+        <div className="studio-workspace">
+          <main className="studio-stage">
+            <div className="stage-heading">
+              <div>
+                <span className={`status-pill status-pill--${activeImage.status}`}>
+                  {STATUS_LABELS[activeImage.status]}
+                </span>
+                <h2>{activeImage.fileName}</h2>
+              </div>
+              <span className="image-count">
+                {images.findIndex((image) => image.id === activeImage.id) + 1} of {images.length}
               </span>
             </div>
-          ))}
+
+            <button type="button" className="canvas-stage" onClick={() => setEditingId(activeImage.id)}>
+              <img src={activeImage.thumbUrl} alt={activeImage.fileName} />
+              <span className="canvas-edit-hint">Tap to edit photo</span>
+            </button>
+
+            <div className="stage-actions">
+              <button type="button" className="primary-action" onClick={() => setEditingId(activeImage.id)}>
+                Edit this photo
+              </button>
+              <button type="button" onClick={() => toggleSelect(activeImage.id)}>
+                {activeImage.selected ? '✓ Selected for batch' : 'Select for batch'}
+              </button>
+              <button type="button" className="quiet-danger" onClick={() => handleRemoveImage(activeImage.id)}>
+                Remove
+              </button>
+            </div>
+          </main>
+
+          <section className="filmstrip-panel" aria-label="Uploaded photos">
+            <div className="filmstrip-heading">
+              <div>
+                <p className="brand-eyebrow">Your batch</p>
+                <h2>Uploaded photos</h2>
+              </div>
+              <span>{selectedCount} selected</span>
+            </div>
+            <div className="filmstrip">
+              {images.map((img) => (
+                <div
+                  key={img.id}
+                  className={`filmstrip-item ${img.id === activeImage.id ? 'filmstrip-item--active' : ''} ${img.selected ? 'filmstrip-item--selected' : ''}`}
+                >
+                  <button type="button" className="filmstrip-open" onClick={() => setActiveId(img.id)}>
+                    <img src={img.thumbUrl} alt={img.fileName} />
+                    <span>{img.fileName}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`thumb-check ${img.selected ? 'thumb-check--on' : ''}`}
+                    onClick={() => toggleSelect(img.id)}
+                    aria-label={img.selected ? `Deselect ${img.fileName}` : `Select ${img.fileName}`}
+                  >
+                    {img.selected ? '✓' : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="thumb-remove"
+                    onClick={() => handleRemoveImage(img.id)}
+                    aria-label={`Remove ${img.fileName}`}
+                  >
+                    ×
+                  </button>
+                  <span className={`filmstrip-status filmstrip-status--${img.status}`}>{STATUS_LABELS[img.status]}</span>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       )}
     </div>
