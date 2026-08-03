@@ -13,6 +13,7 @@ import { computeAutoEnhance } from '../utils/autoEnhance';
 import { removeBackgroundFromFile } from '../utils/removeBackground';
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from '../utils/exportImage';
 import TextTagPicker from './TextTagPicker';
+import TextBlockLibrary from './TextBlockLibrary';
 import './Editor.css';
 
 const CROP_BOX = 380; // fixed square preview box used while in Crop mode
@@ -71,6 +72,9 @@ export default function Editor({
   onSetLogo,
   tagCategories,
   onAddTagChip,
+  textBlocks,
+  onAddTextBlock,
+  onRemoveTextBlock,
 }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
@@ -218,6 +222,8 @@ export default function Editor({
   };
 
   const pickTagAsText = (chip) => addTextLayer(chip, { y: 0.82, fontSizeFrac: 0.07, bgColor: 'rgba(0,0,0,0.55)' });
+  const pickTextBlock = (block) =>
+    addTextLayer(block.text, { y: 0.72, fontSizeFrac: 0.055, bgColor: 'rgba(0,0,0,0.55)' });
 
   const updateTextLayer = (id, patch) => {
     setTextLayers((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -783,7 +789,7 @@ export default function Editor({
           Fit &amp; pad
         </button>
         <button type="button" className={activeTab === 'text' ? 'active' : ''} onClick={() => handleTabChange('text')}>
-          Text &amp; logo
+          Text &amp; watermark
         </button>
         <button type="button" className={activeTab === 'touchup' ? 'active' : ''} onClick={() => handleTabChange('touchup')}>
           Touch-up
@@ -872,10 +878,17 @@ export default function Editor({
 
           {tagCategories && (
             <div className="editor-text-controls">
-              <span className="editor-fill-label">Or tap a tag to add it straight onto the photo:</span>
+              <span className="editor-fill-label">Quick labels</span>
               <TextTagPicker categories={tagCategories} onAddChip={onAddTagChip} onPick={pickTagAsText} />
             </div>
           )}
+
+          <TextBlockLibrary
+            blocks={textBlocks || []}
+            onAdd={onAddTextBlock}
+            onRemove={onRemoveTextBlock}
+            onPick={pickTextBlock}
+          />
 
           {textLayers.length > 0 && (
             <div className="editor-fill-options">
@@ -894,11 +907,11 @@ export default function Editor({
 
           {selectedTextLayer && (
             <div className="editor-text-controls">
-              <input
-                type="text"
+              <textarea
                 value={selectedTextLayer.text}
                 onChange={(e) => updateTextLayer(selectedTextLayer.id, { text: e.target.value })}
                 placeholder="Type your text"
+                rows={4}
               />
               <label className="editor-slider">
                 <span>Size</span>
