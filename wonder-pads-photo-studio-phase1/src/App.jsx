@@ -9,6 +9,7 @@ import { buildCollage } from './utils/collage';
 import { removeBackgroundFromFile } from './utils/removeBackground';
 import { useTextPresets } from './hooks/useTextPresets';
 import TextTagPicker from './components/TextTagPicker';
+import TextBlockLibrary from './components/TextBlockLibrary';
 import Editor from './components/Editor';
 import './App.css';
 
@@ -42,7 +43,13 @@ function App() {
     resetImage,
   } = useLibrary();
   const { logoCanvas, setLogoFile } = useWatermark();
-  const { categories: tagCategories, addChip: addTagChip } = useTextPresets();
+  const {
+    categories: tagCategories,
+    addChip: addTagChip,
+    textBlocks,
+    addTextBlock,
+    removeTextBlock,
+  } = useTextPresets();
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -230,7 +237,7 @@ function App() {
   // that one layer's wording for anything that doesn't quite fit (not
   // every liner in the batch is organic cotton, etc). Tap several tags
   // in a row (e.g. "7in", then "Liner") to stack up multiple labels.
-  const handleApplyTagChip = async (chip) => {
+  const handleApplyTextToSelected = async (text, style = {}) => {
     const targets = images.filter((img) => img.selected);
     if (targets.length === 0) return;
     setApplyingTagChips(true);
@@ -240,12 +247,13 @@ function App() {
         const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
         const newLayer = {
           id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          text: chip,
+          text,
           x: 0.5,
           y: 0.82,
           fontSizeFrac: 0.07,
           color: '#ffffff',
           bgColor: 'rgba(0,0,0,0.55)',
+          ...style,
         };
         const editState = { ...base, textLayers: [...(base.textLayers || []), newLayer] };
         const outCanvas = await renderFullEdit(img.file, editState, img.bgRemovedCanvas, logoCanvas);
@@ -253,14 +261,18 @@ function App() {
         saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
       } catch (err) {
         failCount += 1;
-        console.error(`Adding "${chip}" failed for "${img.fileName}"`, err);
+        console.error(`Adding text failed for "${img.fileName}"`, err);
       }
     }
     setApplyingTagChips(false);
     if (failCount > 0) {
-      alert(`"${chip}" didn't apply to ${failCount} of ${targets.length} photos — check the browser console for details.`);
+      alert(`The text didn't apply to ${failCount} of ${targets.length} photos. Please try again.`);
     }
   };
+
+  const handleApplyTagChip = (chip) => handleApplyTextToSelected(chip);
+  const handleApplyTextBlock = (block) =>
+    handleApplyTextToSelected(block.text, { y: 0.72, fontSizeFrac: 0.055 });
 
   const editingImage = images.find((img) => img.id === editingId);
 
@@ -274,6 +286,9 @@ function App() {
         onSetLogo={setLogoFile}
         tagCategories={tagCategories}
         onAddTagChip={addTagChip}
+        textBlocks={textBlocks}
+        onAddTextBlock={addTextBlock}
+        onRemoveTextBlock={removeTextBlock}
         onClose={() => setEditingId(null)}
         selectedCount={selectedCount}
         onApplyToSelected={handleApplyEditToSelected}
@@ -349,15 +364,22 @@ function App() {
             </button>
             <div className="preset-picker-wrap">
               <button type="button" disabled={selectedCount === 0} onClick={() => setShowTagPicker((v) => !v)}>
-                Add text tag
+                Quick label
               </button>
               {showTagPicker && (
                 <div className="preset-picker export-panel">
-                  <p className="editor-hint">Tap a tag to stamp it onto every selected photo right away.</p>
+                  <p className="editor-hint">Add a quick label or saved text block to every selected photo.</p>
                   <TextTagPicker
                     categories={tagCategories}
                     onAddChip={addTagChip}
                     onPick={handleApplyTagChip}
+                    disabled={applyingTagChips}
+                  />
+                  <TextBlockLibrary
+                    blocks={textBlocks}
+                    onAdd={addTextBlock}
+                    onRemove={removeTextBlock}
+                    onPick={handleApplyTextBlock}
                     disabled={applyingTagChips}
                   />
                   {applyingTagChips && <p className="preset-picker-status">Applying…</p>}
