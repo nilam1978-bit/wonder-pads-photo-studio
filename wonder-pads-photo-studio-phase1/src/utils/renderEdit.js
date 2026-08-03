@@ -266,21 +266,24 @@ export function drawTextLayers(ctx, layers, outWidth, outHeight) {
     ctx.textBaseline = 'middle';
     const px = layer.x * outWidth;
     const py = layer.y * outHeight;
-    const text = layer.text || '';
-    const metrics = ctx.measureText(text);
+    const lines = (layer.text || '').split('\n');
+    const lineHeight = fontSize * 1.2;
+    const textWidth = Math.max(fontSize, ...lines.map((line) => ctx.measureText(line || ' ').width));
+    const textHeight = Math.max(lineHeight, lines.length * lineHeight);
 
     if (layer.bgColor) {
       const padX = fontSize * 0.4;
       const padY = fontSize * 0.3;
-      const bw = metrics.width + padX * 2;
-      const bh = fontSize * 1.3 + padY;
+      const bw = textWidth + padX * 2;
+      const bh = textHeight + padY * 2;
       ctx.fillStyle = layer.bgColor;
       roundRectPath(ctx, px - bw / 2, py - bh / 2, bw, bh, Math.min(10, bh / 2));
       ctx.fill();
     }
 
     ctx.fillStyle = layer.color || '#ffffff';
-    ctx.fillText(text, px, py);
+    const firstLineY = py - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => ctx.fillText(line, px, firstLineY + index * lineHeight));
   });
 }
 
@@ -291,9 +294,9 @@ export function measureTextLayers(ctx, layers, outWidth, outHeight) {
   return (layers || []).map((layer) => {
     const fontSize = fontSizeFor(layer, outWidth);
     ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
-    const metrics = ctx.measureText(layer.text || ' ');
-    const width = Math.max(metrics.width, fontSize) + fontSize * 0.8;
-    const height = fontSize * 1.6;
+    const lines = (layer.text || ' ').split('\n');
+    const width = Math.max(fontSize, ...lines.map((line) => ctx.measureText(line || ' ').width)) + fontSize * 0.8;
+    const height = Math.max(fontSize * 1.6, lines.length * fontSize * 1.2 + fontSize * 0.6);
     const px = layer.x * outWidth;
     const py = layer.y * outHeight;
     return { id: layer.id, x: px - width / 2, y: py - height / 2, width, height };
