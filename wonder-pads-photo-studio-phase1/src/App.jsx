@@ -322,7 +322,7 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${images.length === 0 ? 'app--empty' : ''}`}>
       <header className="app-header">
         <div className="brand-mark" aria-hidden="true">WP</div>
         <div>
@@ -330,12 +330,32 @@ function App() {
           <h1>Photo Studio</h1>
           <p className="app-subtitle">Prepare beautiful product photos, one thoughtful step at a time.</p>
         </div>
-        {images.length > 0 && (
-          <button type="button" className="header-add" onClick={() => fileInputRef.current?.click()}>
-            + Add photos
-          </button>
-        )}
+        <button type="button" className="header-add" onClick={() => fileInputRef.current?.click()}>
+          + Add photos
+        </button>
       </header>
+
+      {images.length === 0 && (
+        <div className="empty-studio-workspace">
+          <aside className="empty-tools-panel">
+            <p className="brand-eyebrow">Prepare photo</p>
+            <h2>Editing tools</h2>
+            <p className="empty-panel-help">Ready as soon as you choose a photo.</p>
+            <div className="empty-tool-group"><span>Size &amp; layout</span><div className="empty-tool-grid"><button disabled>Crop</button><button disabled>Fit &amp; pad</button></div></div>
+            <div className="empty-tool-group"><span>Photo tools</span><button disabled>Remove background</button><button disabled>Text &amp; watermark</button><button disabled>Touch-up</button></div>
+          </aside>
+          <div className="empty-canvas-label"><span>Central canvas</span><p>Upload below to begin editing.</p></div>
+          <aside className="empty-export-panel">
+            <p className="brand-eyebrow">Finish</p>
+            <h2>Export settings</h2>
+            <label>Format</label>
+            <div className="empty-format-row"><button disabled>JPEG</button><button disabled>PNG</button><button disabled>WEBP</button></div>
+            <label>Size</label><div className="empty-setting-field">Choose after uploading</div>
+            <button className="empty-download" disabled>Download selected photos</button>
+          </aside>
+          <section className="empty-filmstrip"><div><p className="brand-eyebrow">Uploaded photos</p><strong>Your photo strip</strong></div><p>Thumbnails and batch selections will appear here.</p></section>
+        </div>
+      )}
 
       <section
         className={`dropzone ${images.length > 0 ? 'dropzone--compact' : ''} ${isDraggingOver ? 'dropzone--active' : ''}`}
