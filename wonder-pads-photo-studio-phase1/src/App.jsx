@@ -355,43 +355,64 @@ function App() {
     );
   }
 
+  const showLegacyDropzone = false;
+
   return (
     <div className={`app ${images.length === 0 ? 'app--empty' : ''}`}>
       <header className="app-header">
-        <div className="brand-mark" aria-hidden="true">WP</div>
+        <div className="brand-mark"><img src="/wonder-pads-photo-studio-icon.png" alt="" /></div>
         <div>
           <p className="brand-eyebrow">Wonder Pads Reusables</p>
           <h1>Photo Studio</h1>
           <p className="app-subtitle">Prepare beautiful product photos, one thoughtful step at a time.</p>
         </div>
-        <button type="button" className="header-add" onClick={() => fileInputRef.current?.click()}>
-          + Add photos
+        <button type="button" className="header-add" disabled>
+          Finish &amp; Export
         </button>
       </header>
 
       {images.length === 0 && (
         <div className="empty-studio-workspace">
-          <aside className="empty-tools-panel">
+          <aside className="empty-main-ribbon" aria-label="Main editing tools">
+            <span className="empty-ribbon-title">Tools</span>
+            {[
+              ['✦', 'Background'], ['⌗', 'Crop'], ['▣', 'Fit & pad'],
+              ['T', 'Text & brand'], ['✎', 'Touch-up'],
+            ].map(([icon, label]) => (
+              <button key={label} type="button" disabled><b>{icon}</b><span>{label}</span></button>
+            ))}
+            <span className="empty-ribbon-spacer" />
+            <button type="button" onClick={() => fileInputRef.current?.click()}><b>+</b><span>Add photos</span></button>
+            <button type="button" disabled><b>↻</b><span>Reset photo</span></button>
+          </aside>
+          <aside className="empty-context-panel">
             <p className="brand-eyebrow">Prepare photo</p>
-            <h2>Editing tools</h2>
-            <p className="empty-panel-help">Ready as soon as you choose a photo.</p>
-            <div className="empty-tool-group"><span>Size &amp; layout</span><div className="empty-tool-grid"><button disabled>Crop</button><button disabled>Fit &amp; pad</button></div></div>
-            <div className="empty-tool-group"><span>Photo tools</span><button disabled>Remove background</button><button disabled>Text &amp; watermark</button><button disabled>Touch-up</button></div>
+            <h2>Choose a tool</h2>
+            <p>Select a main tool from the ribbon. Its settings will open here.</p>
           </aside>
-          <div className="empty-canvas-label" aria-label="Central photo canvas" />
-          <aside className="empty-export-panel">
-            <p className="brand-eyebrow">Finish</p>
-            <h2>Export settings</h2>
-            <label>Format</label>
-            <div className="empty-format-row"><button disabled>JPEG</button><button disabled>PNG</button><button disabled>WEBP</button></div>
-            <label>Size</label><div className="empty-setting-field">Choose after uploading</div>
-            <button className="empty-download" disabled>Download selected photos</button>
+          <section
+            className={`dropzone empty-canvas-dropzone ${isDraggingOver ? 'dropzone--active' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
+            onDragLeave={() => setIsDraggingOver(false)}
+            onDrop={handleDrop}
+          >
+            <span className="dropzone-icon" aria-hidden="true">✦</span>
+            <h2>Bring in your product photos</h2>
+            <p>Select one photo or a whole batch. Originals always stay untouched.</p>
+            <button type="button" onClick={() => fileInputRef.current?.click()}>Choose photos</button>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileInput} hidden />
+            {isImporting && <p className="importing-note">Reading photos…</p>}
+          </section>
+          <aside className="empty-photo-panel">
+            <p className="brand-eyebrow">Uploaded photos</p>
+            <strong>0 photos</strong>
+            <button type="button" disabled>Select all photos</button>
+            <p>Your thumbnails will appear here.</p>
           </aside>
-          <section className="empty-filmstrip"><div><p className="brand-eyebrow">Uploaded photos</p><strong>Your photo strip</strong></div><p>Thumbnails and batch selections will appear here.</p></section>
         </div>
       )}
 
-      <section
+      {showLegacyDropzone && <section
         className={`dropzone ${images.length > 0 ? 'dropzone--compact' : ''} ${isDraggingOver ? 'dropzone--active' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -421,7 +442,7 @@ function App() {
           hidden
         />
         {isImporting && <p className="importing-note">Reading photos…</p>}
-      </section>
+      </section>}
 
       {images.length > 0 && (
         <div className="toolbar">
