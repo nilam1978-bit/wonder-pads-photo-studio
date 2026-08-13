@@ -26,6 +26,9 @@ export const RATIOS = {
 // centered crop rectangle of that ratio that fits inside the image.
 // Coordinates are normalized 0-1 so they don't care about resolution.
 export function computeCenteredCrop(imgWidth, imgHeight, ratioValue) {
+  if (!Number.isFinite(imgWidth) || !Number.isFinite(imgHeight) || imgWidth <= 0 || imgHeight <= 0) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
   if (!ratioValue) {
     return { x: 0, y: 0, width: 1, height: 1 };
   }
