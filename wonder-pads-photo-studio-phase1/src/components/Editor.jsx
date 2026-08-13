@@ -14,6 +14,7 @@ import { removeBackgroundFromFile } from '../utils/removeBackground';
 import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from '../utils/exportImage';
 import TextTagPicker from './TextTagPicker';
 import TextBlockLibrary from './TextBlockLibrary';
+import { SIZE_PRESETS } from '../utils/batchExport';
 import './Editor.css';
 
 const CROP_BOX = 380; // fixed square preview box used while in Crop mode
@@ -66,6 +67,7 @@ export default function Editor({
   onSwitchImage,
   onToggleSelect,
   onRemoveImage,
+  onAddFiles,
   onClose,
   onSave,
   onApplyToSelected,
@@ -79,6 +81,15 @@ export default function Editor({
   textBlocks,
   onAddTextBlock,
   onRemoveTextBlock,
+  exportFormat,
+  onExportFormatChange,
+  exportSizePreset,
+  onExportSizePresetChange,
+  exportRename,
+  onExportRenameChange,
+  exporting,
+  exportProgress,
+  onExportSelected,
 }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
@@ -108,6 +119,7 @@ export default function Editor({
   const textDragRef = useRef(null);
   const textBoundsRef = useRef([]);
   const bgImageCanvasRef = useRef(null); // cached canvas for a custom uploaded backdrop
+  const addPhotosInputRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -767,7 +779,17 @@ export default function Editor({
         <button type="button" onClick={onClose} className="editor-back">
           ← Back
         </button>
+        <div className="editor-brand-copy"><span>Wonder Pads Reusables</span><strong>Photo Studio</strong></div>
         <span className="editor-filename">{image.fileName}</span>
+        <button type="button" className="editor-add-photos" onClick={() => addPhotosInputRef.current?.click()}>+ Add photos</button>
+        <input
+          ref={addPhotosInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => { onAddFiles?.(event.target.files); event.target.value = ''; }}
+        />
         <button type="button" onClick={handleReset} className="editor-reset">
           Reset
         </button>
@@ -1118,6 +1140,24 @@ export default function Editor({
       )}
 
       <div className="editor-save-actions">
+        <div className="editor-export-settings">
+          <span className="editor-kicker">Export selected photos</span>
+          <label>Format</label>
+          <div className="editor-export-options">
+            {['jpeg', 'png', 'webp'].map((format) => (
+              <button key={format} type="button" className={exportFormat === format ? 'active' : ''} onClick={() => onExportFormatChange?.(format)}>{format.toUpperCase()}</button>
+            ))}
+          </div>
+          <label>Output size</label>
+          <select value={exportSizePreset} onChange={(event) => onExportSizePresetChange?.(event.target.value)}>
+            {Object.entries(SIZE_PRESETS).map(([key, preset]) => <option key={key} value={key}>{preset.label}</option>)}
+          </select>
+          <label>Rename files <small>(optional)</small></label>
+          <input type="text" value={exportRename} placeholder="e.g. moonrise-floral" onChange={(event) => onExportRenameChange?.(event.target.value)} />
+          <button type="button" className="editor-export-selected" onClick={() => onExportSelected?.(currentEditRecipe())} disabled={selectedCount === 0 || exporting}>
+            {exporting ? `Exporting ${exportProgress ? `${exportProgress.done}/${exportProgress.total}` : ''}…` : `Download ${selectedCount || ''} selected photo${selectedCount === 1 ? '' : 's'}`}
+          </button>
+        </div>
         <button
           type="button"
           className="editor-apply-selected"
