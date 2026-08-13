@@ -297,6 +297,10 @@ function App() {
     return (
       <Editor
         image={editingImage}
+        images={images}
+        onSwitchImage={setEditingId}
+        onToggleSelect={toggleSelect}
+        onRemoveImage={handleRemoveImage}
         onBgRemoved={setBgRemovedCanvas}
         onReset={resetImage}
         logoCanvas={logoCanvas}
@@ -309,9 +313,9 @@ function App() {
         onClose={() => setEditingId(null)}
         selectedCount={selectedCount}
         onApplyToSelected={handleApplyEditToSelected}
-        onSave={(id, editState, newThumbUrl, status) => {
+        onSave={(id, editState, newThumbUrl, status, options = {}) => {
           saveEdit(id, editState, newThumbUrl, status);
-          setEditingId(null);
+          if (!options.keepOpen) setEditingId(null);
         }}
       />
     );
