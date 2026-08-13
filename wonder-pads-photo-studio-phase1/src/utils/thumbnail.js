@@ -10,10 +10,14 @@ export async function createThumbnail(file) {
   // "from-image" tells the browser to bake in the phone's rotation info
   // (EXIF orientation) so sideways phone photos preview upright.
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  // Capture dimensions before bitmap.close(); browsers reset a closed
+  // ImageBitmap's width and height to zero.
+  const fullWidth = bitmap.width;
+  const fullHeight = bitmap.height;
 
-  const scale = Math.min(1, MAX_THUMB_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  const outWidth = Math.round(bitmap.width * scale);
-  const outHeight = Math.round(bitmap.height * scale);
+  const scale = Math.min(1, MAX_THUMB_DIMENSION / Math.max(fullWidth, fullHeight));
+  const outWidth = Math.round(fullWidth * scale);
+  const outHeight = Math.round(fullHeight * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = outWidth;
@@ -26,7 +30,7 @@ export async function createThumbnail(file) {
 
   return {
     thumbUrl: URL.createObjectURL(blob),
-    fullWidth: bitmap.width,
-    fullHeight: bitmap.height,
+    fullWidth,
+    fullHeight,
   };
 }
