@@ -813,6 +813,46 @@
 .editor-library-modal header > button,
 .editor-export-modal-head > button { border:0; background:transparent; color:#8d5878; font-size:24px; cursor:pointer; }
 
+/* Text libraries float beside the contextual tools. They do not dim the
+   workspace or alter the grid/thumbnail positions. */
+.editor-overlay--floating {
+  inset: 76px auto auto 390px;
+  display: block;
+  width: min(430px, calc(100vw - 420px));
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.editor-overlay--floating .editor-library-modal {
+  width: 100%;
+  max-height: calc(100vh - 100px);
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(48,32,45,.22);
+  pointer-events: auto;
+}
+
+.editor-overlay--floating .editor-library-modal header { margin-bottom: 10px; }
+.editor-overlay--floating .editor-library-modal header h2 { font-size: 22px; }
+
+@media (max-width: 1050px) {
+  .editor-overlay--floating {
+    left: 350px;
+    width: min(390px, calc(100vw - 372px));
+  }
+}
+
+@media (max-width: 760px) {
+  .editor-overlay--floating {
+    inset: auto 12px 12px;
+    width: auto;
+  }
+  .editor-overlay--floating .editor-library-modal { max-height: 72vh; }
+}
+
 .editor-popup-launch {
   display:flex;
   align-items:center;
