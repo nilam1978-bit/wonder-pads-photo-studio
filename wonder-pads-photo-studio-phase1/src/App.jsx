@@ -7,6 +7,7 @@ import { applyRecipeToPhoto, completeEditRecipe } from './utils/editRecipe';
 import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
 import { buildCollage } from './utils/collage';
 import { removeBackgroundFromFile } from './utils/removeBackground';
+import { loadImageCanvas } from './utils/loadImageCanvas';
 import { useTextPresets } from './hooks/useTextPresets';
 import TextTagPicker from './components/TextTagPicker';
 import TextBlockLibrary from './components/TextBlockLibrary';
@@ -120,29 +121,43 @@ function App() {
   // it doesn't trigger a download for each one; use Export for that.
   const handleApplyEditToSelected = async (sourceId, sourceEditState) => {
     const targets = images.filter((img) => img.selected);
-    if (targets.length === 0) return 0;
+    if (targets.length === 0) return { successes: [], failures: [] };
     const sourcePhoto = images.find((img) => img.id === sourceId);
     const photosToUpdate =
       sourcePhoto && !sourcePhoto.selected ? [sourcePhoto, ...targets] : targets;
+    const successes = [];
+    const failures = [];
 
     for (const img of photosToUpdate) {
-      const editState =
-        img.id === sourceId
-          ? completeEditRecipe(sourceEditState)
-          : applyRecipeToPhoto(sourceEditState, img);
-
-      let cutout = img.bgRemovedCanvas;
-      if (editState.removeBackground && !cutout) {
-        cutout = await removeBackgroundFromFile(img.file);
-        setBgRemovedCanvas(img.id, cutout);
+      try {
+        let recipeTarget = img;
+        // Repairs photos imported before the dimension-capture fix without
+        // requiring the user to remove and upload the batch again.
+        if (!img.fullWidth || !img.fullHeight) {
+          const dimensionCanvas = await loadImageCanvas(img.file, 1600);
+          recipeTarget = { ...img, fullWidth: dimensionCanvas.width, fullHeight: dimensionCanvas.height };
+        }
+        const editState =
+          img.id === sourceId
+            ? completeEditRecipe(sourceEditState)
+            : applyRecipeToPhoto(sourceEditState, recipeTarget);
+        let cutout = img.bgRemovedCanvas;
+        if (editState.removeBackground && !cutout) cutout = await removeBackgroundFromFile(img.file);
+        const outCanvas = await renderFullEdit(img.file, editState, cutout, logoCanvas);
+        const previewUrl = await makeThumbFromCanvas(outCanvas);
+        successes.push({ id: img.id, fileName: img.fileName, previewUrl, editState, cutout });
+      } catch (error) {
+        failures.push({ id: img.id, fileName: img.fileName, message: error?.message || 'Could not render this photo.' });
       }
-
-      const outCanvas = await renderFullEdit(img.file, editState, cutout, logoCanvas);
-      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
-      saveEdit(img.id, editState, newThumbUrl, 'edited');
     }
+    return { successes, failures };
+  };
 
-    return targets.length;
+  const handleCommitBatchPreview = (preview) => {
+    for (const item of preview.successes) {
+      if (item.cutout) setBgRemovedCanvas(item.id, item.cutout);
+      saveEdit(item.id, item.editState, item.previewUrl, 'edited');
+    }
   };
 
   // Stamps the logo onto every selected photo, keeping whatever else is
@@ -306,6 +321,8 @@ function App() {
         images={images}
         onSwitchImage={(id) => { setActiveId(id); setEditingId(id); }}
         onToggleSelect={toggleSelect}
+        onSelectAll={selectAll}
+        onClearSelection={clearSelection}
         onRemoveImage={handleRemoveImage}
         onAddFiles={addFiles}
         onBgRemoved={setBgRemovedCanvas}
@@ -320,6 +337,7 @@ function App() {
         onClose={() => setEditingId(null)}
         selectedCount={selectedCount}
         onApplyToSelected={handleApplyEditToSelected}
+        onCommitBatchPreview={handleCommitBatchPreview}
         exportFormat={exportFormat}
         onExportFormatChange={setExportFormat}
         exportSizePreset={exportSizePreset}
