@@ -376,8 +376,9 @@
 body {
   margin: 0;
   background:
-    radial-gradient(circle at top left, rgba(236, 216, 232, 0.55), transparent 32rem),
-    var(--wp-cream);
+    radial-gradient(circle at 16% 0%, rgba(246, 210, 237, 0.75), transparent 34rem),
+    linear-gradient(135deg, #fff8fd 0%, #fbe8f5 48%, #f7dff0 100%);
+  background-attachment: fixed;
 }
 
 button,
@@ -395,6 +396,160 @@ textarea {
   padding: 26px 24px 64px;
   color: var(--wp-plum);
   font-family: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* The studio remains visible before the first upload. */
+.app--empty {
+  position: relative;
+  width: 100%;
+  padding-inline: clamp(16px, 3vw, 42px);
+}
+
+.empty-studio-workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(420px, 1fr) minmax(230px, 290px);
+  grid-template-rows: minmax(420px, calc(100vh - 260px)) auto;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.empty-tools-panel,
+.empty-export-panel,
+.empty-canvas-label,
+.empty-filmstrip {
+  border: 1px solid #ead2e2;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 30px rgba(65, 31, 55, 0.07);
+}
+
+.empty-tools-panel,
+.empty-export-panel {
+  padding: 20px;
+}
+
+.empty-tools-panel h2,
+.empty-export-panel h2 {
+  margin: 4px 0 6px;
+  color: #30202d;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+}
+
+.empty-panel-help {
+  margin: 0 0 22px;
+  color: #887481;
+  font-size: 12px;
+}
+
+.empty-tool-group {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.empty-tool-group > span,
+.empty-export-panel label {
+  color: #9b718e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.empty-tool-grid,
+.empty-format-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.empty-format-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.empty-tools-panel button,
+.empty-export-panel button,
+.empty-setting-field {
+  width: 100%;
+  border: 1px solid #edd8e6;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fcf1f8;
+  color: #6f5367;
+  text-align: left;
+}
+
+.empty-tools-panel button:disabled,
+.empty-export-panel button:disabled {
+  opacity: .72;
+}
+
+.empty-canvas-label {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: rgba(255,255,255,.86);
+}
+
+.empty-canvas-label span {
+  color: #493143;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.empty-canvas-label p,
+.empty-filmstrip p {
+  margin: 5px 0 0;
+  color: #927d8b;
+  font-size: 12px;
+}
+
+.empty-export-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.empty-setting-field { color: #9a8593; font-size: 12px; }
+.empty-export-panel .empty-download { margin-top: auto; padding: 13px; background: #30202d; color: #fff; text-align: center; }
+
+.empty-filmstrip {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 92px;
+  padding: 16px 20px;
+}
+
+.empty-filmstrip strong { color: #493143; }
+
+/* Put the real upload target over the central placeholder. */
+.empty-studio-workspace + .dropzone {
+  position: absolute;
+  top: 230px;
+  left: calc(clamp(16px, 3vw, 42px) + min(290px, 22vw) + 36px);
+  right: calc(clamp(16px, 3vw, 42px) + min(290px, 22vw) + 36px);
+  width: auto;
+  min-height: 270px;
+  display: grid;
+  place-content: center;
+  box-shadow: none;
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .empty-studio-workspace { grid-template-columns: 240px 1fr; grid-template-rows: auto auto auto; }
+  .empty-export-panel { grid-column: 1; }
+  .empty-canvas-label { grid-column: 2; grid-row: 1 / span 2; min-height: 520px; }
+  .empty-studio-workspace + .dropzone { left: 280px; right: 28px; top: 250px; }
+}
+
+@media (max-width: 640px) {
+  .empty-studio-workspace { display: flex; flex-direction: column; }
+  .empty-canvas-label { min-height: 360px; order: -1; }
+  .empty-studio-workspace + .dropzone { top: 205px; left: 28px; right: 28px; min-height: 240px; }
+  .empty-filmstrip { align-items: flex-start; flex-direction: column; }
 }
 
 .app-header {
