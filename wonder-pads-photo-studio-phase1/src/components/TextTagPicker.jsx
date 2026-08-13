@@ -12,26 +12,31 @@ export default function TextTagPicker({ categories, onAddChip, onPick, disabled 
   return (
     <div className="tagpicker">
       {Object.entries(categories).map(([category, chips]) => (
-        <div key={category} className="tagpicker-category">
-          <span className="editor-fill-label">{category}</span>
-          <div className="editor-fill-options">
-            {chips.map((chip) => (
-              <button key={chip} type="button" disabled={disabled} onClick={() => onPick(chip)}>
-                {chip}
-              </button>
-            ))}
-            <input
-              type="text"
-              className="tagpicker-add-input"
-              placeholder="+ add"
-              value={customInputs[category] || ''}
-              onChange={(e) => setCustomInputs((prev) => ({ ...prev, [category]: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddCustom(category);
-              }}
-            />
+        <details key={category} className="tagpicker-category-dropdown">
+          <summary>
+            <span>{category}</span>
+            <small>{chips.length} label{chips.length === 1 ? '' : 's'}</small>
+          </summary>
+          <div className="tagpicker-category">
+            <div className="editor-fill-options">
+              {chips.map((chip) => (
+                <button key={chip} type="button" disabled={disabled} onClick={() => onPick(chip)}>
+                  {chip}
+                </button>
+              ))}
+              <input
+                type="text"
+                className="tagpicker-add-input"
+                placeholder="+ add"
+                value={customInputs[category] || ''}
+                onChange={(e) => setCustomInputs((prev) => ({ ...prev, [category]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddCustom(category);
+                }}
+              />
+            </div>
           </div>
-        </div>
+        </details>
       ))}
     </div>
   );
