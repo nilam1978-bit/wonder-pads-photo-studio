@@ -195,8 +195,12 @@ function App() {
   // that passes through this — even ones you never opened in the Editor —
   // comes out with its phone's EXIF/GPS metadata stripped, since that's
   // just how re-encoding through canvas works.
-  const handleExport = async () => {
-    const targets = images.filter((img) => img.selected);
+  const handleExport = async (currentOverride = null) => {
+    const targets = images
+      .filter((img) => img.selected)
+      .map((img) => currentOverride && img.id === currentOverride.id
+        ? { ...img, editState: currentOverride.editState }
+        : img);
     if (targets.length === 0) return;
     setExporting(true);
     setExportProgress({ done: 0, total: targets.length });
@@ -292,15 +296,18 @@ function App() {
 
   const activeImage = images.find((img) => img.id === activeId) || images[0] || null;
   const editingImage = images.find((img) => img.id === editingId);
+  const workspaceImage = editingImage || activeImage;
 
-  if (editingImage) {
+  if (workspaceImage) {
     return (
       <Editor
-        image={editingImage}
+        key={workspaceImage.id}
+        image={workspaceImage}
         images={images}
-        onSwitchImage={setEditingId}
+        onSwitchImage={(id) => { setActiveId(id); setEditingId(id); }}
         onToggleSelect={toggleSelect}
         onRemoveImage={handleRemoveImage}
+        onAddFiles={addFiles}
         onBgRemoved={setBgRemovedCanvas}
         onReset={resetImage}
         logoCanvas={logoCanvas}
@@ -313,6 +320,15 @@ function App() {
         onClose={() => setEditingId(null)}
         selectedCount={selectedCount}
         onApplyToSelected={handleApplyEditToSelected}
+        exportFormat={exportFormat}
+        onExportFormatChange={setExportFormat}
+        exportSizePreset={exportSizePreset}
+        onExportSizePresetChange={setExportSizePreset}
+        exportRename={exportRename}
+        onExportRenameChange={setExportRename}
+        exporting={exporting}
+        exportProgress={exportProgress}
+        onExportSelected={(editState) => handleExport({ id: workspaceImage.id, editState })}
         onSave={(id, editState, newThumbUrl, status, options = {}) => {
           saveEdit(id, editState, newThumbUrl, status);
           if (!options.keepOpen) setEditingId(null);
@@ -344,7 +360,7 @@ function App() {
             <div className="empty-tool-group"><span>Size &amp; layout</span><div className="empty-tool-grid"><button disabled>Crop</button><button disabled>Fit &amp; pad</button></div></div>
             <div className="empty-tool-group"><span>Photo tools</span><button disabled>Remove background</button><button disabled>Text &amp; watermark</button><button disabled>Touch-up</button></div>
           </aside>
-          <div className="empty-canvas-label"><span>Central canvas</span><p>Upload below to begin editing.</p></div>
+          <div className="empty-canvas-label" aria-label="Central photo canvas" />
           <aside className="empty-export-panel">
             <p className="brand-eyebrow">Finish</p>
             <h2>Export settings</h2>
