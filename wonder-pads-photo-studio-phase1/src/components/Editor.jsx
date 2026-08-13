@@ -97,7 +97,7 @@ export default function Editor({
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
   const [mode, setMode] = useState(initial.mode || 'crop');
-  const [activeTab, setActiveTab] = useState(initial.mode || 'crop');
+  const [activeTab, setActiveTab] = useState(null);
   const [ratioKey, setRatioKey] = useState(initial.ratioKey || 'free');
   const [crop, setCrop] = useState(initial.crop || { x: 0, y: 0, width: 1, height: 1 });
   const [fitFill, setFitFill] = useState(initial.fitFill || DEFAULT_FILL);
@@ -116,6 +116,9 @@ export default function Editor({
   const [saving, setSaving] = useState(false);
   const [applyingToSelected, setApplyingToSelected] = useState(false);
   const [batchPreview, setBatchPreview] = useState(null);
+  const [excludedPreviewIds, setExcludedPreviewIds] = useState(() => new Set());
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [textPopup, setTextPopup] = useState(null);
   const [bgImageVersion, setBgImageVersion] = useState(0);
 
   const canvasRef = useRef(null);
@@ -179,6 +182,10 @@ export default function Editor({
   );
 
   const handleTabChange = (tab) => {
+    if (activeTab === tab) {
+      setActiveTab(null);
+      return;
+    }
     setActiveTab(tab);
     if (tab === 'crop' || tab === 'fit') {
       setMode(tab);
@@ -209,7 +216,7 @@ export default function Editor({
 
   const handleReset = () => {
     setMode('crop');
-    setActiveTab('crop');
+    setActiveTab(null);
     setRatioKey('free');
     setCrop({ x: 0, y: 0, width: 1, height: 1 });
     setFitFill(DEFAULT_FILL);
@@ -698,7 +705,7 @@ export default function Editor({
     if (activeTab === 'crop') handleCropPointerDown(e);
     else if (activeTab === 'fit') handleFitClick(e);
     else if (activeTab === 'touchup') handleBrushPointerDown(e);
-    else handleTextPointerDown(e);
+    else if (activeTab === 'text') handleTextPointerDown(e);
   };
 
   const handleLogoPick = (e) => {
@@ -738,6 +745,7 @@ export default function Editor({
     setApplyingToSelected(true);
     try {
       const preview = await onApplyToSelected(image.id, currentEditRecipe());
+      setExcludedPreviewIds(new Set());
       setBatchPreview(preview);
     } catch (err) {
       console.error('Could not apply this edit to the selected photos.', err);
@@ -749,13 +757,42 @@ export default function Editor({
 
   const discardBatchPreview = () => {
     batchPreview?.successes?.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    setExcludedPreviewIds(new Set());
     setBatchPreview(null);
   };
 
-  const confirmBatchPreview = () => {
-    if (!batchPreview?.successes?.length) return;
-    onCommitBatchPreview?.(batchPreview);
+  const commitIncludedBatchPreview = () => {
+    const includedSuccesses = batchPreview?.successes?.filter((item) => !excludedPreviewIds.has(item.id)) || [];
+    if (!includedSuccesses.length) return false;
+    batchPreview.successes
+      .filter((item) => excludedPreviewIds.has(item.id))
+      .forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    onCommitBatchPreview?.({ ...batchPreview, successes: includedSuccesses });
+    setExcludedPreviewIds(new Set());
     setBatchPreview(null);
+    return true;
+  };
+
+  const confirmBatchPreview = () => {
+    commitIncludedBatchPreview();
+  };
+
+  const editPreviewPhoto = (id) => {
+    // The previews are not saved until the user confirms. Editing one photo
+    // must therefore commit the checked batch first; treating this like
+    // Cancel would make every previewed text layer appear to disappear.
+    const committed = commitIncludedBatchPreview();
+    if (!committed) discardBatchPreview();
+    onSwitchImage?.(id);
+  };
+
+  const togglePreviewPhoto = (id) => {
+    setExcludedPreviewIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   // Save the current edit back to the library before moving to another
@@ -786,7 +823,7 @@ export default function Editor({
   }
 
   const isComposedTab = COMPOSED_TABS.includes(activeTab);
-  const showFillOptions = activeTab === 'fit' || (!isComposedTab && removeBackground);
+  const showFillOptions = activeTab === 'fit' || (activeTab === 'background' && removeBackground);
   const allPhotosSelected = images.length > 0 && selectedCount === images.length;
 
   return (
@@ -797,7 +834,7 @@ export default function Editor({
         </button>
         <div className="editor-brand-copy"><span>Wonder Pads Reusables</span><strong>Photo Studio</strong></div>
         <span className="editor-filename">{image.fileName}</span>
-        <button type="button" className="editor-add-photos" onClick={() => addPhotosInputRef.current?.click()}>+ Add photos</button>
+        <button type="button" className="editor-header-export" onClick={() => setShowExportModal(true)}>Finish &amp; Export</button>
         <input
           ref={addPhotosInputRef}
           type="file"
@@ -806,18 +843,15 @@ export default function Editor({
           hidden
           onChange={(event) => { onAddFiles?.(event.target.files); event.target.value = ''; }}
         />
-        <button type="button" onClick={handleReset} className="editor-reset">
-          Reset
-        </button>
       </div>
 
       <aside className="editor-tool-heading">
         <span className="editor-kicker">Prepare photo</span>
-        <h1>Editing tools</h1>
-        <p>Choose only the changes this photo needs.</p>
+        <h1>{activeTab === 'background' ? 'Background' : activeTab === 'fit' ? 'Fit & pad' : activeTab === 'text' ? 'Text & brand' : activeTab === 'touchup' ? 'Touch-up' : activeTab === 'crop' ? 'Crop' : 'Choose a tool'}</h1>
+        <p>{activeTab ? 'Contextual controls for the selected main tool.' : 'Select a main tool from the ribbon.'}</p>
       </aside>
 
-      <div className="editor-bg-row">
+      <div className={`editor-bg-row ${activeTab !== 'background' ? 'editor-context-hidden' : ''}`}>
         <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>
           {removingBackground
             ? 'Removing background…'
@@ -840,24 +874,30 @@ export default function Editor({
           </>
         )}
       </div>
-      {removingBackground && (
+      {activeTab === 'background' && removingBackground && (
         <p className="editor-hint">First run downloads the model — this can take a little while.</p>
       )}
-      {checkEdges && <p className="editor-hint">Checkerboard shows through any transparent area — look for faint color fringes.</p>}
+      {activeTab === 'background' && checkEdges && <p className="editor-hint">Checkerboard shows through any transparent area — look for faint color fringes.</p>}
 
       <div className="editor-modes">
+        <button type="button" className={activeTab === 'background' ? 'active' : ''} onClick={() => handleTabChange('background')}>
+          <span aria-hidden="true">✦</span>Background
+        </button>
         <button type="button" className={activeTab === 'crop' ? 'active' : ''} onClick={() => handleTabChange('crop')}>
-          Crop
+          <span aria-hidden="true">⌗</span>Crop
         </button>
         <button type="button" className={activeTab === 'fit' ? 'active' : ''} onClick={() => handleTabChange('fit')}>
-          Fit &amp; pad
+          <span aria-hidden="true">▣</span>Fit &amp; pad
         </button>
         <button type="button" className={activeTab === 'text' ? 'active' : ''} onClick={() => handleTabChange('text')}>
-          Text &amp; watermark
+          <span aria-hidden="true">T</span>Text &amp; brand
         </button>
         <button type="button" className={activeTab === 'touchup' ? 'active' : ''} onClick={() => handleTabChange('touchup')}>
-          Touch-up
+          <span aria-hidden="true">✎</span>Touch-up
         </button>
+        <div className="editor-ribbon-spacer" />
+        <button type="button" className="editor-ribbon-action" onClick={() => addPhotosInputRef.current?.click()}><span aria-hidden="true">＋</span>Add photos</button>
+        <button type="button" className="editor-ribbon-action editor-ribbon-reset" onClick={handleReset}><span aria-hidden="true">↺</span>Reset photo</button>
       </div>
 
       <div className="editor-canvas-wrap">
@@ -868,7 +908,7 @@ export default function Editor({
         />
       </div>
 
-      {!isComposedTab && (
+      {(activeTab === 'crop' || activeTab === 'fit') && (
         <div className="editor-ratios">
           {ratioButtonsForMode(activeTab).map((key) => (
             <button
@@ -941,18 +981,10 @@ export default function Editor({
           </button>
 
           {tagCategories && (
-            <div className="editor-text-controls">
-              <span className="editor-fill-label">Quick labels</span>
-              <TextTagPicker categories={tagCategories} onAddChip={onAddTagChip} onPick={pickTagAsText} />
-            </div>
+            <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('labels')}>Quick labels <span>›</span></button>
           )}
 
-          <TextBlockLibrary
-            blocks={textBlocks || []}
-            onAdd={onAddTextBlock}
-            onRemove={onRemoveTextBlock}
-            onPick={pickTextBlock}
-          />
+          <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('blocks')}>Saved text blocks <span>›</span></button>
 
           {textLayers.length > 0 && (
             <div className="editor-fill-options">
@@ -1018,8 +1050,9 @@ export default function Editor({
             </div>
           )}
 
-          <div className="editor-watermark-panel">
-            <span className="editor-fill-label">Logo watermark</span>
+          <details className="editor-compact-section">
+            <summary>Logo watermark</summary>
+            <div className="editor-watermark-panel">
             {!logoCanvas ? (
               <label className="editor-file-button">
                 Upload your logo
@@ -1079,7 +1112,21 @@ export default function Editor({
                 )}
               </>
             )}
-          </div>
+            </div>
+          </details>
+        </div>
+      )}
+
+      {textPopup && (
+        <div className="editor-overlay" role="dialog" aria-modal="true" aria-label={textPopup === 'labels' ? 'Quick labels' : 'Saved text blocks'}>
+          <section className="editor-library-modal">
+            <header><div><span className="editor-kicker">Text &amp; brand</span><h2>{textPopup === 'labels' ? 'Quick labels' : 'Saved text blocks'}</h2></div><button type="button" onClick={() => setTextPopup(null)}>×</button></header>
+            {textPopup === 'labels' ? (
+              <TextTagPicker categories={tagCategories} onAddChip={onAddTagChip} onPick={(chip) => { pickTagAsText(chip); setTextPopup(null); }} />
+            ) : (
+              <TextBlockLibrary blocks={textBlocks || []} onAdd={onAddTextBlock} onRemove={onRemoveTextBlock} onPick={(block) => { pickTextBlock(block); setTextPopup(null); }} />
+            )}
+          </section>
         </div>
       )}
 
@@ -1155,14 +1202,16 @@ export default function Editor({
         </div>
       )}
 
-      <div className="editor-batch-apply">
+      {activeTab && <div className="editor-batch-apply">
         <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
           {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
         </button>
         <p className="editor-hint">Review every result before the edit is applied.</p>
-      </div>
+      </div>}
 
+      {showExportModal && <div className="editor-overlay" role="dialog" aria-modal="true" aria-label="Finish and export">
       <div className="editor-save-actions">
+        <header className="editor-export-modal-head"><div><span className="editor-kicker">Finish</span><h2>Finish &amp; Export</h2></div><button type="button" onClick={() => setShowExportModal(false)}>×</button></header>
         <div className="editor-export-settings">
           <span className="editor-kicker">Export selected photos</span>
           <label>Format</label>
@@ -1197,7 +1246,7 @@ export default function Editor({
         <button type="button" className="editor-save" onClick={handleSave} disabled={saving || applyingToSelected}>
           {saving ? 'Saving…' : 'Save & download this photo'}
         </button>
-      </div>
+      </div></div>}
 
       {batchPreview && (
         <div className="batch-preview-backdrop" role="dialog" aria-modal="true" aria-label="Review batch edit">
@@ -1207,13 +1256,26 @@ export default function Editor({
               <button type="button" onClick={discardBatchPreview} aria-label="Close preview">×</button>
             </header>
             <p className="batch-preview-summary">
-              {batchPreview.successes.length} ready · {batchPreview.failures.length} need individual attention
+              {batchPreview.successes.length - excludedPreviewIds.size} selected to apply · {batchPreview.failures.length} need individual attention
             </p>
             {batchPreview.successes.length > 0 && (
               <div className="batch-preview-section">
                 <h3>Ready to apply</h3>
                 <div className="batch-preview-grid">
-                  {batchPreview.successes.map((item) => <figure key={item.id}><img src={item.previewUrl} alt="" /><figcaption>{item.fileName}</figcaption></figure>)}
+                  {batchPreview.successes.map((item) => {
+                    const included = !excludedPreviewIds.has(item.id);
+                    return (
+                      <figure key={item.id} className={included ? 'batch-preview-card selected' : 'batch-preview-card'}>
+                        <label className="batch-preview-check">
+                          <input type="checkbox" checked={included} onChange={() => togglePreviewPhoto(item.id)} />
+                          <span>{included ? 'Selected' : 'Not selected'}</span>
+                        </label>
+                        <img src={item.previewUrl} alt="" />
+                        <figcaption title={item.fileName}>{item.fileName}</figcaption>
+                        <button type="button" className="batch-preview-edit" onClick={() => editPreviewPhoto(item.id)}>Apply selected &amp; edit this photo</button>
+                      </figure>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1223,15 +1285,15 @@ export default function Editor({
                 {batchPreview.failures.map((item) => (
                   <div className="batch-preview-failure" key={item.id}>
                     <div><strong>{item.fileName}</strong><span>{item.message}</span></div>
-                    <button type="button" onClick={() => { discardBatchPreview(); onSwitchImage?.(item.id); }}>Edit individually</button>
+                    <button type="button" onClick={() => editPreviewPhoto(item.id)}>Apply ready photos &amp; edit this one</button>
                   </div>
                 ))}
               </div>
             )}
             <footer>
               <button type="button" className="batch-preview-cancel" onClick={discardBatchPreview}>Cancel—change nothing</button>
-              <button type="button" className="batch-preview-confirm" onClick={confirmBatchPreview} disabled={batchPreview.successes.length === 0}>
-                Apply to {batchPreview.successes.length} successful photo{batchPreview.successes.length === 1 ? '' : 's'}
+              <button type="button" className="batch-preview-confirm" onClick={confirmBatchPreview} disabled={batchPreview.successes.length - excludedPreviewIds.size === 0}>
+                Apply to {batchPreview.successes.length - excludedPreviewIds.size} selected photo{batchPreview.successes.length - excludedPreviewIds.size === 1 ? '' : 's'}
               </button>
             </footer>
           </section>
