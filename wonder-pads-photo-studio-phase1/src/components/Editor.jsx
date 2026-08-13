@@ -62,6 +62,10 @@ function resizeWithRatio(corner, anchor, candidateWidth, ratioValue) {
 
 export default function Editor({
   image,
+  images = [],
+  onSwitchImage,
+  onToggleSelect,
+  onRemoveImage,
   onClose,
   onSave,
   onApplyToSelected,
@@ -727,6 +731,22 @@ export default function Editor({
     }
   };
 
+  // Save the current edit back to the library before moving to another
+  // uploaded photo. Switching photos should not trigger a download.
+  const handleSwitchImage = async (nextId) => {
+    if (!nextId || nextId === image.id || !onSwitchImage || saving || applyingToSelected) return;
+    setSaving(true);
+    try {
+      const editState = currentEditRecipe();
+      const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas, logoCanvas);
+      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+      onSave(image.id, editState, newThumbUrl, 'edited', { keepOpen: true });
+      onSwitchImage(nextId);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!sourceCanvas) {
     return (
       <div className="editor">
@@ -752,6 +772,12 @@ export default function Editor({
           Reset
         </button>
       </div>
+
+      <aside className="editor-tool-heading">
+        <span className="editor-kicker">Prepare photo</span>
+        <h1>Editing tools</h1>
+        <p>Choose only the changes this photo needs.</p>
+      </aside>
 
       <div className="editor-bg-row">
         <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>
@@ -1109,6 +1135,35 @@ export default function Editor({
           {saving ? 'Saving…' : 'Save & download this photo'}
         </button>
       </div>
+
+      {images.length > 0 && (
+        <section className="editor-filmstrip" aria-label="Uploaded photos">
+          <div className="editor-filmstrip-head">
+            <div>
+              <span className="editor-kicker">Uploaded photos</span>
+              <strong>{images.length} photo{images.length === 1 ? '' : 's'} · {selectedCount} selected</strong>
+            </div>
+            <p>Choose a photo to continue editing. Current changes save automatically.</p>
+          </div>
+          <div className="editor-filmstrip-track">
+            {images.map((item) => (
+              <article key={item.id} className={`editor-filmstrip-item ${item.id === image.id ? 'active' : ''}`}>
+                <button type="button" className="editor-filmstrip-photo" onClick={() => handleSwitchImage(item.id)} aria-label={`Edit ${item.fileName}`}>
+                  <img src={item.thumbUrl} alt="" />
+                  {item.id === image.id && <span>Editing</span>}
+                </button>
+                <div className="editor-filmstrip-meta">
+                  <label>
+                    <input type="checkbox" checked={item.selected} onChange={() => onToggleSelect?.(item.id)} />
+                    Select
+                  </label>
+                  <button type="button" onClick={() => onRemoveImage?.(item.id)} aria-label={`Remove ${item.fileName}`}>×</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
