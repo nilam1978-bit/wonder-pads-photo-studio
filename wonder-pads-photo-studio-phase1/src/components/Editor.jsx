@@ -66,11 +66,14 @@ export default function Editor({
   images = [],
   onSwitchImage,
   onToggleSelect,
+  onSelectAll,
+  onClearSelection,
   onRemoveImage,
   onAddFiles,
   onClose,
   onSave,
   onApplyToSelected,
+  onCommitBatchPreview,
   selectedCount,
   onReset,
   onBgRemoved,
@@ -112,6 +115,7 @@ export default function Editor({
   const [currentStroke, setCurrentStroke] = useState(null);
   const [saving, setSaving] = useState(false);
   const [applyingToSelected, setApplyingToSelected] = useState(false);
+  const [batchPreview, setBatchPreview] = useState(null);
   const [bgImageVersion, setBgImageVersion] = useState(0);
 
   const canvasRef = useRef(null);
@@ -733,14 +737,25 @@ export default function Editor({
     if (!onApplyToSelected || selectedCount === 0) return;
     setApplyingToSelected(true);
     try {
-      await onApplyToSelected(image.id, currentEditRecipe());
-      onClose();
+      const preview = await onApplyToSelected(image.id, currentEditRecipe());
+      setBatchPreview(preview);
     } catch (err) {
       console.error('Could not apply this edit to the selected photos.', err);
-      window.alert('This edit could not be applied to every selected photo. Please try again.');
+      setBatchPreview({ successes: [], failures: [{ id: image.id, fileName: image.fileName, message: err?.message || 'Preview failed.' }] });
     } finally {
       setApplyingToSelected(false);
     }
+  };
+
+  const discardBatchPreview = () => {
+    batchPreview?.successes?.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    setBatchPreview(null);
+  };
+
+  const confirmBatchPreview = () => {
+    if (!batchPreview?.successes?.length) return;
+    onCommitBatchPreview?.(batchPreview);
+    setBatchPreview(null);
   };
 
   // Save the current edit back to the library before moving to another
@@ -772,6 +787,7 @@ export default function Editor({
 
   const isComposedTab = COMPOSED_TABS.includes(activeTab);
   const showFillOptions = activeTab === 'fit' || (!isComposedTab && removeBackground);
+  const allPhotosSelected = images.length > 0 && selectedCount === images.length;
 
   return (
     <div className="editor">
@@ -1139,6 +1155,13 @@ export default function Editor({
         </div>
       )}
 
+      <div className="editor-batch-apply">
+        <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
+          {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
+        </button>
+        <p className="editor-hint">Review every result before the edit is applied.</p>
+      </div>
+
       <div className="editor-save-actions">
         <div className="editor-export-settings">
           <span className="editor-kicker">Export selected photos</span>
@@ -1176,14 +1199,58 @@ export default function Editor({
         </button>
       </div>
 
+      {batchPreview && (
+        <div className="batch-preview-backdrop" role="dialog" aria-modal="true" aria-label="Review batch edit">
+          <section className="batch-preview-modal">
+            <header>
+              <div><span className="editor-kicker">Review before applying</span><h2>Batch edit preview</h2></div>
+              <button type="button" onClick={discardBatchPreview} aria-label="Close preview">×</button>
+            </header>
+            <p className="batch-preview-summary">
+              {batchPreview.successes.length} ready · {batchPreview.failures.length} need individual attention
+            </p>
+            {batchPreview.successes.length > 0 && (
+              <div className="batch-preview-section">
+                <h3>Ready to apply</h3>
+                <div className="batch-preview-grid">
+                  {batchPreview.successes.map((item) => <figure key={item.id}><img src={item.previewUrl} alt="" /><figcaption>{item.fileName}</figcaption></figure>)}
+                </div>
+              </div>
+            )}
+            {batchPreview.failures.length > 0 && (
+              <div className="batch-preview-section batch-preview-failures">
+                <h3>Could not be applied</h3>
+                {batchPreview.failures.map((item) => (
+                  <div className="batch-preview-failure" key={item.id}>
+                    <div><strong>{item.fileName}</strong><span>{item.message}</span></div>
+                    <button type="button" onClick={() => { discardBatchPreview(); onSwitchImage?.(item.id); }}>Edit individually</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <footer>
+              <button type="button" className="batch-preview-cancel" onClick={discardBatchPreview}>Cancel—change nothing</button>
+              <button type="button" className="batch-preview-confirm" onClick={confirmBatchPreview} disabled={batchPreview.successes.length === 0}>
+                Apply to {batchPreview.successes.length} successful photo{batchPreview.successes.length === 1 ? '' : 's'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
       {images.length > 0 && (
         <section className="editor-filmstrip" aria-label="Uploaded photos">
           <div className="editor-filmstrip-head">
-            <div>
+            <div className="editor-filmstrip-title">
               <span className="editor-kicker">Uploaded photos</span>
               <strong>{images.length} photo{images.length === 1 ? '' : 's'} · {selectedCount} selected</strong>
             </div>
-            <p>Choose a photo to continue editing. Current changes save automatically.</p>
+            <div className="editor-filmstrip-actions">
+              <p>Choose a photo to continue editing. Current changes save automatically.</p>
+              <button type="button" onClick={allPhotosSelected ? onClearSelection : onSelectAll}>
+                {allPhotosSelected ? 'Clear selection' : `Select all ${images.length} photos`}
+              </button>
+            </div>
           </div>
           <div className="editor-filmstrip-track">
             {images.map((item) => (
