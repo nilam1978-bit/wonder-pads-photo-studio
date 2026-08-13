@@ -4,5 +4,6 @@
 
 body {
   margin: 0;
-  background: #fffdfc;
+  min-height: 100vh;
+  background: #fbe8f5;
 }
