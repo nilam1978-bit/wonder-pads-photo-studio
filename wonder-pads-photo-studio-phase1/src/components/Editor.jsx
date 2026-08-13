@@ -1118,7 +1118,7 @@ export default function Editor({
       )}
 
       {textPopup && (
-        <div className="editor-overlay" role="dialog" aria-modal="true" aria-label={textPopup === 'labels' ? 'Quick labels' : 'Saved text blocks'}>
+        <div className="editor-overlay editor-overlay--floating" role="dialog" aria-modal="false" aria-label={textPopup === 'labels' ? 'Quick labels' : 'Saved text blocks'}>
           <section className="editor-library-modal">
             <header><div><span className="editor-kicker">Text &amp; brand</span><h2>{textPopup === 'labels' ? 'Quick labels' : 'Saved text blocks'}</h2></div><button type="button" onClick={() => setTextPopup(null)}>×</button></header>
             {textPopup === 'labels' ? (
