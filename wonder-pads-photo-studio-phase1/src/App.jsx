@@ -58,6 +58,8 @@ function App() {
   const [applyingWatermark, setApplyingWatermark] = useState(false);
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
   const [bgBatchProgress, setBgBatchProgress] = useState(null);
+  const [batchReviewIds, setBatchReviewIds] = useState([]);
+  const [photoPanelView, setPhotoPanelView] = useState('photos');
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [applyingTagChips, setApplyingTagChips] = useState(false);
 
@@ -338,6 +340,10 @@ function App() {
         selectedCount={selectedCount}
         onApplyToSelected={handleApplyEditToSelected}
         onCommitBatchPreview={handleCommitBatchPreview}
+        batchReviewIds={batchReviewIds}
+        onBatchReviewIdsChange={setBatchReviewIds}
+        photoPanelView={photoPanelView}
+        onPhotoPanelViewChange={setPhotoPanelView}
         exportFormat={exportFormat}
         onExportFormatChange={setExportFormat}
         exportSizePreset={exportSizePreset}
