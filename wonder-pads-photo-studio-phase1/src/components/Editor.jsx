@@ -5,6 +5,7 @@ import {
   computeCenteredCrop,
   drawEdit,
   drawCheckerboard,
+  drawTextLayers,
   measureTextLayers,
   filterString,
 } from '../utils/renderEdit';
@@ -93,6 +94,10 @@ export default function Editor({
   exporting,
   exportProgress,
   onExportSelected,
+  batchReviewIds = [],
+  onBatchReviewIdsChange,
+  photoPanelView = 'photos',
+  onPhotoPanelViewChange,
 }) {
   const initial = image.editState || {};
   const [sourceCanvas, setSourceCanvas] = useState(null);
@@ -331,6 +336,18 @@ export default function Editor({
     );
     ctx.restore();
 
+    // Text belongs to the finished crop, so keep it visible inside the
+    // movable crop rectangle while the framing is adjusted.
+    if (textLayers.length) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rect.x, rect.y, rect.w, rect.h);
+      ctx.clip();
+      ctx.translate(rect.x, rect.y);
+      drawTextLayers(ctx, textLayers, rect.w, rect.h);
+      ctx.restore();
+    }
+
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
@@ -346,7 +363,7 @@ export default function Editor({
       ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [drawSource, crop, adjustments, removeBackground, checkEdges, getCropLayout]);
+  }, [drawSource, crop, adjustments, removeBackground, checkEdges, textLayers, getCropLayout]);
 
   // ---- Fit-mode layout + drawing ----
   const getFitBoxSize = useCallback(() => {
@@ -379,11 +396,11 @@ export default function Editor({
       drawSource,
       drawSource.width,
       drawSource.height,
-      { mode: 'fit', fitFill: resolvedFill, adjustments },
+      { mode: 'fit', fitFill: resolvedFill, adjustments, textLayers, brushStrokes, watermark: resolvedWatermark },
       w,
       h
     );
-  }, [drawSource, resolvedFill, adjustments, getFitBoxSize, removeBackground, checkEdges]);
+  }, [drawSource, resolvedFill, adjustments, textLayers, brushStrokes, resolvedWatermark, getFitBoxSize, removeBackground, checkEdges]);
 
   // ---- Composed-view tabs (Text & logo / Touch-up): both show the fully
   // composed result (whatever framing is currently set), since that's the
@@ -740,6 +757,18 @@ export default function Editor({
     setSaving(false);
   };
 
+  const handleSaveOnly = async () => {
+    setSaving(true);
+    try {
+      const editState = currentEditRecipe();
+      const outCanvas = await renderFullEdit(image.file, editState, image.bgRemovedCanvas, logoCanvas);
+      const newThumbUrl = await makeThumbFromCanvas(outCanvas);
+      onSave(image.id, editState, newThumbUrl, 'edited', { keepOpen: true });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleApplyToSelected = async () => {
     if (!onApplyToSelected || selectedCount === 0) return;
     setApplyingToSelected(true);
@@ -764,6 +793,11 @@ export default function Editor({
   const commitIncludedBatchPreview = () => {
     const includedSuccesses = batchPreview?.successes?.filter((item) => !excludedPreviewIds.has(item.id)) || [];
     if (!includedSuccesses.length) return false;
+    onBatchReviewIdsChange?.([
+      ...includedSuccesses.map((item) => item.id),
+      ...(batchPreview?.failures || []).map((item) => item.id),
+    ]);
+    onPhotoPanelViewChange?.('review');
     batchPreview.successes
       .filter((item) => excludedPreviewIds.has(item.id))
       .forEach((item) => URL.revokeObjectURL(item.previewUrl));
@@ -825,6 +859,9 @@ export default function Editor({
   const isComposedTab = COMPOSED_TABS.includes(activeTab);
   const showFillOptions = activeTab === 'fit' || (activeTab === 'background' && removeBackground);
   const allPhotosSelected = images.length > 0 && selectedCount === images.length;
+  const batchReviewImages = batchReviewIds
+    .map((id) => images.find((item) => item.id === id))
+    .filter(Boolean);
 
   return (
     <div className="editor">
@@ -1203,6 +1240,9 @@ export default function Editor({
       )}
 
       {activeTab && <div className="editor-batch-apply">
+        <button type="button" className="editor-save-individual" onClick={handleSaveOnly} disabled={saving || applyingToSelected}>
+          {saving ? 'Saving this photo…' : batchReviewIds.includes(image.id) ? 'Save this individual edit' : 'Save this photo'}
+        </button>
         <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
           {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
         </button>
@@ -1302,31 +1342,47 @@ export default function Editor({
 
       {images.length > 0 && (
         <section className="editor-filmstrip" aria-label="Uploaded photos">
+          <div className="editor-panel-tabs" role="tablist" aria-label="Photo panel view">
+            <button type="button" role="tab" aria-selected={photoPanelView === 'photos'} className={photoPanelView === 'photos' ? 'active' : ''} onClick={() => onPhotoPanelViewChange?.('photos')}>Photos</button>
+            <button type="button" role="tab" aria-selected={photoPanelView === 'review'} className={photoPanelView === 'review' ? 'active' : ''} onClick={() => onPhotoPanelViewChange?.('review')} disabled={batchReviewImages.length === 0}>
+              Batch review{batchReviewImages.length > 0 ? ` (${batchReviewImages.length})` : ''}
+            </button>
+          </div>
           <div className="editor-filmstrip-head">
             <div className="editor-filmstrip-title">
-              <span className="editor-kicker">Uploaded photos</span>
-              <strong>{images.length} photo{images.length === 1 ? '' : 's'} · {selectedCount} selected</strong>
+              <span className="editor-kicker">{photoPanelView === 'review' ? 'Latest batch' : 'Uploaded photos'}</span>
+              <strong>{photoPanelView === 'review' ? `${batchReviewImages.length} photos to review` : `${images.length} photo${images.length === 1 ? '' : 's'} · ${selectedCount} selected`}</strong>
             </div>
-            <div className="editor-filmstrip-actions">
-              <p>Choose a photo to continue editing. Current changes save automatically.</p>
-              <button type="button" onClick={allPhotosSelected ? onClearSelection : onSelectAll}>
-                {allPhotosSelected ? 'Clear selection' : `Select all ${images.length} photos`}
-              </button>
-            </div>
+            {photoPanelView === 'photos' ? (
+              <div className="editor-filmstrip-actions">
+                <p>Choose a photo to continue editing. Current changes save automatically.</p>
+                <button type="button" onClick={allPhotosSelected ? onClearSelection : onSelectAll}>
+                  {allPhotosSelected ? 'Clear selection' : `Select all ${images.length} photos`}
+                </button>
+              </div>
+            ) : (
+              <div className="editor-filmstrip-actions editor-review-actions">
+                <p>Open any photo for a closer adjustment, then return here to continue reviewing.</p>
+                <button type="button" onClick={() => setShowExportModal(true)}>Done review · Finish &amp; Export</button>
+              </div>
+            )}
           </div>
           <div className="editor-filmstrip-track">
-            {images.map((item) => (
+            {(photoPanelView === 'review' ? batchReviewImages : images).map((item) => (
               <article key={item.id} className={`editor-filmstrip-item ${item.id === image.id ? 'active' : ''}`}>
                 <button type="button" className="editor-filmstrip-photo" onClick={() => handleSwitchImage(item.id)} aria-label={`Edit ${item.fileName}`}>
                   <img src={item.thumbUrl} alt="" />
                   {item.id === image.id && <span>Editing</span>}
                 </button>
                 <div className="editor-filmstrip-meta">
-                  <label>
-                    <input type="checkbox" checked={item.selected} onChange={() => onToggleSelect?.(item.id)} />
-                    Select
-                  </label>
-                  <button type="button" onClick={() => onRemoveImage?.(item.id)} aria-label={`Remove ${item.fileName}`}>×</button>
+                  {photoPanelView === 'review' ? (
+                    <button type="button" className="editor-review-edit" onClick={() => handleSwitchImage(item.id)}>Edit photo</button>
+                  ) : (
+                    <>
+                      <label><input type="checkbox" checked={item.selected} onChange={() => onToggleSelect?.(item.id)} />Select</label>
+                      <button type="button" onClick={() => onRemoveImage?.(item.id)} aria-label={`Remove ${item.fileName}`}>×</button>
+                    </>
+                  )}
                 </div>
               </article>
             ))}
