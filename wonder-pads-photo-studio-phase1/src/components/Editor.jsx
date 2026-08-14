@@ -1243,10 +1243,14 @@ export default function Editor({
         <button type="button" className="editor-save-individual" onClick={handleSaveOnly} disabled={saving || applyingToSelected}>
           {saving ? 'Saving this photo…' : batchReviewIds.includes(image.id) ? 'Save this individual edit' : 'Save this photo'}
         </button>
-        <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
-          {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
-        </button>
-        <p className="editor-hint">Review every result before the edit is applied.</p>
+        {photoPanelView !== 'review' && (
+          <>
+            <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
+              {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
+            </button>
+            <p className="editor-hint">Review every result before the edit is applied.</p>
+          </>
+        )}
       </div>}
 
       {showExportModal && <div className="editor-overlay" role="dialog" aria-modal="true" aria-label="Finish and export">
