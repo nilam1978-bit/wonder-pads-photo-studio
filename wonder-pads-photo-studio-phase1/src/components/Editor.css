@@ -315,6 +315,20 @@
   font-weight: 800;
 }
 
+.editor-save-individual {
+  width: 100%;
+  margin-bottom: 8px;
+  border: 1px solid #c982b7;
+  border-radius: 10px;
+  padding: 11px;
+  background: #fffafd;
+  color: #563b4e;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.editor-save-individual:disabled { opacity: .55; cursor: default; }
+
 .editor-apply-selected:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -529,6 +543,33 @@
   color: var(--petal-muted);
   font-size: 12px;
 }
+
+.editor-panel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-bottom: 11px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #f8eaf4;
+}
+
+.editor-panel-tabs button {
+  min-width: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 5px;
+  background: transparent;
+  color: #765a6e;
+  font-size: 10px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.editor-panel-tabs button.active { background: #fff; color: #4a3042; box-shadow: 0 2px 8px rgba(68,35,58,.09); }
+.editor-panel-tabs button:disabled { opacity: .42; cursor: default; }
+.editor-review-actions button { background: #ead0e3; }
+.editor-filmstrip-meta .editor-review-edit { width: 100%; height: auto; padding: 6px; border-radius: 7px; font-size: 9px; font-weight: 800; }
 
 .editor-kicker {
   display: block;
@@ -1198,3 +1239,37 @@
 .batch-preview-check { display: flex; align-items: center; gap: 5px; padding: 7px; color: #604456; font-size: 10px; font-weight: 800; cursor: pointer; }
 .batch-preview-check input { accent-color: #a84d91; }
 .batch-preview-edit { width: calc(100% - 14px); margin: 0 7px; border: 1px solid #d99acb; border-radius: 8px; padding: 6px; background: #fff7fc; color: #68435d; font-size: 10px; font-weight: 800; cursor: pointer; }
+
+/* Definitive text-library popover placement. Kept last so the shared export
+   modal backdrop can never turn this panel back into a centred modal. */
+.editor .editor-overlay.editor-overlay--floating {
+  inset: 76px auto auto 390px;
+  display: block;
+  width: min(430px, calc(100vw - 420px));
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.editor .editor-overlay.editor-overlay--floating > .editor-library-modal {
+  width: 100%;
+  max-height: calc(100vh - 100px);
+  margin: 0;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+@media (max-width: 1050px) {
+  .editor .editor-overlay.editor-overlay--floating {
+    inset: 72px 18px auto auto;
+    width: min(390px, calc(100vw - 36px));
+  }
+}
+
+@media (max-width: 760px) {
+  .editor .editor-overlay.editor-overlay--floating {
+    inset: auto 12px 12px;
+    width: auto;
+  }
+}
