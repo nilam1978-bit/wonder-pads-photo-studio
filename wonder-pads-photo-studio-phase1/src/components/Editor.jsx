@@ -107,6 +107,9 @@ export default function Editor({
   const [crop, setCrop] = useState(initial.crop || { x: 0, y: 0, width: 1, height: 1 });
   const [fitFill, setFitFill] = useState(initial.fitFill || DEFAULT_FILL);
   const [adjustments, setAdjustments] = useState(initial.adjustments || DEFAULT_ADJUSTMENTS);
+  const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
+  const [mobileContext, setMobileContext] = useState('root');
+  const [mobileAdjustment, setMobileAdjustment] = useState('brightness');
   const [removeBackground, setRemoveBackground] = useState(initial.removeBackground || false);
   const [removingBackground, setRemovingBackground] = useState(false);
   const [checkEdges, setCheckEdges] = useState(false);
@@ -187,6 +190,7 @@ export default function Editor({
   );
 
   const handleTabChange = (tab) => {
+    setMobileContext('root');
     if (activeTab === tab) {
       setActiveTab(null);
       return;
@@ -864,14 +868,16 @@ export default function Editor({
     .filter(Boolean);
 
   return (
-    <div className="editor">
+    <div className={`editor ${activeTab ? `editor--${activeTab}` : ''}`}>
       <div className="editor-topbar">
-        <button type="button" onClick={onClose} className="editor-back">
-          ← Back
-        </button>
+        <div className="editor-brand-mark"><img src="/wonder-pads-photo-studio-icon.png" alt="" /></div>
         <div className="editor-brand-copy"><span>Wonder Pads Reusables</span><strong>Photo Studio</strong></div>
         <span className="editor-filename">{image.fileName}</span>
-        <button type="button" className="editor-header-export" onClick={() => setShowExportModal(true)}>Finish &amp; Export</button>
+        <div className="editor-quick-actions">
+          <button type="button" onClick={() => addPhotosInputRef.current?.click()}>＋ Add</button>
+          <button type="button" onClick={handleReset}>↻ Reset</button>
+          <button type="button" className="editor-header-export" onClick={() => setShowExportModal(true)}>⇩ Export</button>
+        </div>
         <input
           ref={addPhotosInputRef}
           type="file"
@@ -882,19 +888,13 @@ export default function Editor({
         />
       </div>
 
-      <aside className="editor-tool-heading">
-        <span className="editor-kicker">Prepare photo</span>
-        <h1>{activeTab === 'background' ? 'Background' : activeTab === 'fit' ? 'Fit & pad' : activeTab === 'text' ? 'Text & brand' : activeTab === 'touchup' ? 'Touch-up' : activeTab === 'crop' ? 'Crop' : 'Choose a tool'}</h1>
-        <p>{activeTab ? 'Contextual controls for the selected main tool.' : 'Select a main tool from the ribbon.'}</p>
-      </aside>
-
       <div className={`editor-bg-row ${activeTab !== 'background' ? 'editor-context-hidden' : ''}`}>
         <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>
           {removingBackground
             ? 'Removing background…'
             : removeBackground
             ? '✓ Background removed'
-            : 'Remove background'}
+            : 'Remove'}
         </button>
         {removeBackground && (
           <>
@@ -906,7 +906,7 @@ export default function Editor({
               className={checkEdges ? 'active' : ''}
               onClick={() => setCheckEdges((v) => !v)}
             >
-              Check edges
+              Edges
             </button>
           </>
         )}
@@ -918,24 +918,70 @@ export default function Editor({
 
       <div className="editor-modes">
         <button type="button" className={activeTab === 'background' ? 'active' : ''} onClick={() => handleTabChange('background')}>
-          <span aria-hidden="true">✦</span>Background
+          <span aria-hidden="true">✦</span>BG
         </button>
         <button type="button" className={activeTab === 'crop' ? 'active' : ''} onClick={() => handleTabChange('crop')}>
           <span aria-hidden="true">⌗</span>Crop
         </button>
         <button type="button" className={activeTab === 'fit' ? 'active' : ''} onClick={() => handleTabChange('fit')}>
-          <span aria-hidden="true">▣</span>Fit &amp; pad
+          <span aria-hidden="true">▣</span>Fit
         </button>
-        <button type="button" className={activeTab === 'text' ? 'active' : ''} onClick={() => handleTabChange('text')}>
-          <span aria-hidden="true">T</span>Text &amp; brand
+        <button type="button" className={activeTab === 'text' && mobileContext.startsWith('labels') ? 'active' : ''} onClick={() => { setActiveTab('text'); setMobileContext('labels'); }}>
+          <span aria-hidden="true">Aa</span>Labels
+        </button>
+        <button type="button" className={activeTab === 'text' && textPopup === 'blocks' ? 'active' : ''} onClick={() => { setActiveTab('text'); setMobileContext('root'); setTextPopup('blocks'); }}>
+          <span aria-hidden="true">▤</span>Library
+        </button>
+        <button type="button" className={activeTab === 'text' && mobileContext === 'logo' ? 'active' : ''} onClick={() => { setActiveTab('text'); setMobileContext('logo'); }}>
+          <span aria-hidden="true">◇</span>Logo
         </button>
         <button type="button" className={activeTab === 'touchup' ? 'active' : ''} onClick={() => handleTabChange('touchup')}>
           <span aria-hidden="true">✎</span>Touch-up
         </button>
-        <div className="editor-ribbon-spacer" />
-        <button type="button" className="editor-ribbon-action" onClick={() => addPhotosInputRef.current?.click()}><span aria-hidden="true">＋</span>Add photos</button>
-        <button type="button" className="editor-ribbon-action editor-ribbon-reset" onClick={handleReset}><span aria-hidden="true">↺</span>Reset photo</button>
       </div>
+
+      {activeTab && (
+        <div className={`editor-mobile-context editor-mobile-context--${mobileContext}`}>
+          {mobileContext !== 'root' && mobileContext !== 'labels' && mobileContext !== 'logo' && <button type="button" className="editor-context-back" aria-label="Back" onClick={() => setMobileContext(activeTab === 'text' ? 'labels' : 'root')}>‹</button>}
+          {mobileContext === 'root' && activeTab === 'background' && <>
+            <button type="button" onClick={handleRemoveBackground} disabled={removingBackground}>{removeBackground ? '✓ Removed' : 'Remove'}</button>
+            {removeBackground && <button type="button" onClick={() => setCheckEdges((value) => !value)} className={checkEdges ? 'active' : ''}>Edges</button>}
+            <button type="button" onClick={() => setMobileContext('adjust')}>Adjust</button>
+            <button type="button" onClick={handleAutoEnhance}>Auto</button>
+          </>}
+          {mobileContext === 'root' && (activeTab === 'crop' || activeTab === 'fit') && <>
+            {ratioButtonsForMode(activeTab).map((key) => <button key={key} type="button" className={ratioKey === key ? 'active' : ''} onClick={() => applyRatio(key, activeTab)}>{key === 'free' ? 'Free' : key}</button>)}
+            {activeTab === 'fit' && <button type="button" onClick={() => setMobileContext('fill')}>Fill</button>}
+            <button type="button" onClick={() => setMobileContext('adjust')}>Adjust</button>
+            <button type="button" onClick={handleAutoEnhance}>Auto</button>
+          </>}
+          {mobileContext === 'adjust' && <>
+            {Object.keys(DEFAULT_ADJUSTMENTS).map((key) => <button key={key} type="button" className={mobileAdjustment === key ? 'active' : ''} onClick={() => setMobileAdjustment(key)}>{key === 'brightness' ? 'Bright' : key === 'saturation' ? 'Colour' : 'Contrast'}</button>)}
+            <label className="editor-mobile-slider"><input type="range" min="-100" max="100" value={adjustments[mobileAdjustment]} onChange={(event) => setAdjustments((value) => ({ ...value, [mobileAdjustment]: Number(event.target.value) }))} /><span>{adjustments[mobileAdjustment]}</span></label>
+          </>}
+          {mobileContext === 'fill' && <>
+            <button type="button" className={fitFill.type === 'color' ? 'active' : ''} onClick={() => setFitFill((value) => ({ type: 'color', color: value.color || '#ffffff' }))}>Colour</button>
+            <input aria-label="Fill colour" type="color" value={fitFill.color || '#ffffff'} onChange={(event) => setFitFill({ type: 'color', color: event.target.value })} />
+            <button type="button" onClick={() => setEyedropperActive((value) => !value)} className={eyedropperActive ? 'active' : ''}>Pick</button>
+            <button type="button" onClick={() => setFitFill({ type: 'blur' })} className={fitFill.type === 'blur' ? 'active' : ''}>Blur</button>
+            <label className="editor-mobile-file">Image<input type="file" accept="image/*" onChange={handleBackgroundImagePick} hidden /></label>
+          </>}
+          {mobileContext === 'labels' && Object.keys(tagCategories || {}).map((category) => <button key={category} type="button" onClick={() => setMobileContext(`labels:${category}`)}>{category}</button>)}
+          {mobileContext.startsWith('labels:') && (tagCategories?.[mobileContext.slice(7)] || []).map((chip) => <button key={chip} type="button" onClick={() => pickTagAsText(chip)}>{chip}</button>)}
+          {mobileContext === 'logo' && <>
+            <label className="editor-mobile-file">{logoCanvas ? 'Change' : 'Upload'}<input type="file" accept="image/*" onChange={handleLogoPick} hidden /></label>
+            {logoCanvas && WATERMARK_CORNERS.map((corner) => <button key={corner} type="button" className={watermark.corner === corner ? 'active' : ''} onClick={() => setWatermark((value) => ({ ...value, enabled: true, corner }))}>{corner.split('-').map((part) => part[0].toUpperCase()).join('')}</button>)}
+            {logoCanvas && <label className="editor-mobile-slider editor-logo-opacity"><span>Opacity</span><input type="range" min="10" max="100" value={Math.round(watermark.opacity * 100)} onChange={(event) => setWatermark((value) => ({ ...value, enabled: true, opacity: Number(event.target.value) / 100 }))} /><span>{Math.round(watermark.opacity * 100)}%</span></label>}
+          </>}
+          {mobileContext === 'root' && activeTab === 'touchup' && <>
+            <button type="button" className={brushTool === 'blur' ? 'active' : ''} onClick={() => setBrushTool('blur')}>Blur</button>
+            {removeBackground && <button type="button" className={brushTool === 'erase' ? 'active' : ''} onClick={() => setBrushTool('erase')}>Erase</button>}
+            {removeBackground && <button type="button" className={brushTool === 'restore' ? 'active' : ''} onClick={() => setBrushTool('restore')}>Restore</button>}
+            <button type="button" onClick={undoLastStroke} disabled={!brushStrokes.length}>Undo</button>
+            <button type="button" onClick={clearStrokes} disabled={!brushStrokes.length}>Clear</button>
+          </>}
+        </div>
+      )}
 
       <div className="editor-canvas-wrap">
         <canvas
@@ -988,7 +1034,7 @@ export default function Editor({
               />
             )}
             <button type="button" className={eyedropperActive ? 'active' : ''} onClick={() => setEyedropperActive((v) => !v)}>
-              Eyedropper
+              Pick
             </button>
             {!removeBackground && (
               <button
@@ -999,11 +1045,11 @@ export default function Editor({
                   setFitFill({ type: 'blur' });
                 }}
               >
-                Blur-extend
+                Blur
               </button>
             )}
             <label className={`editor-file-button ${fitFill.type === 'image' ? 'active' : ''}`}>
-              Custom image
+              Image
               <input type="file" accept="image/*" onChange={handleBackgroundImagePick} hidden />
             </label>
           </div>
@@ -1014,14 +1060,14 @@ export default function Editor({
       {activeTab === 'text' && (
         <div className="editor-text-panel">
           <button type="button" onClick={() => addTextLayer()}>
-            + Add text
+            + Add
           </button>
 
           {tagCategories && (
-            <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('labels')}>Quick labels <span>›</span></button>
+            <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('labels')}>Labels <span>›</span></button>
           )}
 
-          <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('blocks')}>Saved text blocks <span>›</span></button>
+          <button type="button" className="editor-popup-launch" onClick={() => setTextPopup('blocks')}>Saved <span>›</span></button>
 
           {textLayers.length > 0 && (
             <div className="editor-fill-options">
@@ -1212,11 +1258,13 @@ export default function Editor({
       )}
 
       {!isComposedTab && (
-        <div className="editor-adjustments">
+        <div className={`editor-adjustments ${adjustmentsOpen ? 'is-open' : ''}`}>
           <div className="editor-adjustments-header">
-            <span className="editor-fill-label">Adjustments</span>
+            <button type="button" className="editor-adjustments-toggle" onClick={() => setAdjustmentsOpen((value) => !value)} aria-expanded={adjustmentsOpen}>
+              Adjust <span aria-hidden="true">{adjustmentsOpen ? '⌄' : '⌃'}</span>
+            </button>
             <button type="button" onClick={handleAutoEnhance}>
-              Auto-enhance
+              Auto
             </button>
           </div>
           {[
@@ -1246,7 +1294,7 @@ export default function Editor({
         {photoPanelView !== 'review' && (
           <>
             <button type="button" className="editor-apply-selected" onClick={handleApplyToSelected} disabled={applyingToSelected || saving || selectedCount === 0}>
-              {applyingToSelected ? 'Preparing previews…' : `Preview & apply to ${selectedCount} selected photo${selectedCount === 1 ? '' : 's'}`}
+              {applyingToSelected ? 'Preparing previews…' : `Preview edit on ${selectedCount} photo${selectedCount === 1 ? '' : 's'}`}
             </button>
             <p className="editor-hint">Review every result before the edit is applied.</p>
           </>
@@ -1296,7 +1344,7 @@ export default function Editor({
         <div className="batch-preview-backdrop" role="dialog" aria-modal="true" aria-label="Review batch edit">
           <section className="batch-preview-modal">
             <header>
-              <div><span className="editor-kicker">Review before applying</span><h2>Batch edit preview</h2></div>
+              <div><span className="editor-kicker">Review before applying</span><h2>Preview edit on photos</h2></div>
               <button type="button" onClick={discardBatchPreview} aria-label="Close preview">×</button>
             </header>
             <p className="batch-preview-summary">
@@ -1337,7 +1385,7 @@ export default function Editor({
             <footer>
               <button type="button" className="batch-preview-cancel" onClick={discardBatchPreview}>Cancel—change nothing</button>
               <button type="button" className="batch-preview-confirm" onClick={confirmBatchPreview} disabled={batchPreview.successes.length - excludedPreviewIds.size === 0}>
-                Apply to {batchPreview.successes.length - excludedPreviewIds.size} selected photo{batchPreview.successes.length - excludedPreviewIds.size === 1 ? '' : 's'}
+                Apply &amp; save {batchPreview.successes.length - excludedPreviewIds.size} photo{batchPreview.successes.length - excludedPreviewIds.size === 1 ? '' : 's'}
               </button>
             </footer>
           </section>
