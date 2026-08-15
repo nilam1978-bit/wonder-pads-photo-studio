@@ -20,6 +20,28 @@
   gap: 12px;
 }
 
+.editor-brand-mark { display: none; }
+.editor-quick-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.editor-quick-actions button { white-space: nowrap; }
+.editor-quick-actions button:not(.editor-header-export) { border: 1px solid #e7bfd9; background: #faeaf5; color: #6a3557; }
+.editor-quick-actions button:not(.editor-header-export):hover { border-color: #d98bc1; background: #f3d6e9; }
+.editor-mobile-context { display: none; }
+
+.editor,
+.editor button,
+.editor input,
+.editor select,
+.editor textarea { color: #30272e; }
+.editor button { font-weight: 600; }
+.editor h1, .editor h2, .editor h3, .editor strong { font-weight: 600; }
+.editor input[type='range'] { accent-color: #dea1c8; }
+.editor input[type='range']::-webkit-slider-runnable-track { background: #f3d6e9; border-radius: 999px; }
+.editor input[type='range']::-webkit-slider-thumb { accent-color: #d98bc1; }
+.editor .editor-header-export,
+.editor .editor-export-selected,
+.editor .editor-save,
+.editor .batch-preview-confirm { color: #fff; }
+
 .editor-reset {
   margin-left: auto;
   background: none;
@@ -1272,4 +1294,275 @@
     inset: auto 12px 12px;
     width: auto;
   }
+}
+
+/* Mobile studio -----------------------------------------------------------
+   The canvas and photos remain visible while the main tools become a
+   thumb-friendly bottom ribbon. Desktop placement above remains unchanged. */
+@media (max-width: 1024px) {
+  .editor {
+    display: flex;
+    min-height: 100dvh;
+    padding: 0 10px calc(154px + env(safe-area-inset-bottom));
+    gap: 10px;
+    overflow-x: hidden;
+  }
+
+  .editor-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    order: 0;
+    width: calc(100% + 20px);
+    min-height: 108px;
+    margin: 0 -10px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 10px 12px 8px;
+    gap: 8px;
+    background: rgba(251, 229, 245, .97);
+  }
+
+  .editor-brand-mark { display: block; width: 48px; height: 48px; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 22px rgba(91,58,82,.16); }
+  .editor-brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .editor-brand-copy { min-width: 0; align-self: center; }
+  .editor-brand-copy span { display: block; margin-bottom: 2px; color: var(--wp-rose); font-size: 10px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; }
+  .editor-brand-copy strong { display: block; color: var(--wp-plum); font-size: 24px; font-weight: 600; letter-spacing: -.03em; white-space: nowrap; }
+  .editor-filename { display: none; }
+  .editor-quick-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    margin: 2px 0 0;
+  }
+  .editor-quick-actions button {
+    min-height: 30px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    font-size: 10px;
+  }
+
+  .editor-canvas-wrap {
+    order: 1;
+    min-height: 0;
+    height: min(54dvh, 500px);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: hidden;
+  }
+
+  .editor-canvas {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    align-self: center;
+    object-fit: contain;
+  }
+
+  .editor-filmstrip {
+    order: 3;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .editor-panel-tabs { margin-bottom: 7px; }
+  .editor-filmstrip-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 8px;
+    margin-bottom: 8px;
+  }
+  .editor-filmstrip-title { grid-column: 1; grid-row: 1; }
+  .editor-filmstrip-title strong { font-size: 12px; }
+  .editor-filmstrip-actions { display: contents; }
+  .editor-filmstrip-actions button {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+    margin: 0;
+    padding: 7px 9px;
+  }
+  .editor-filmstrip-actions p {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-size: 10px;
+  }
+  .editor-filmstrip-track {
+    display: flex;
+    gap: 8px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+  }
+  .editor-filmstrip-item { flex: 0 0 88px; scroll-snap-align: start; }
+  .editor-filmstrip-photo { height: 68px; }
+  .editor-filmstrip-meta { padding: 5px; font-size: 9px; }
+
+  .editor-bg-row,
+  .editor-ratios,
+  .editor-fill,
+  .editor-text-panel,
+  .editor-touchup-panel,
+  .editor-adjustments,
+  .editor-hint,
+  .editor-save-actions,
+  .editor-batch-apply {
+    order: 4;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .editor > .editor-bg-row,
+  .editor > .editor-ratios,
+  .editor > .editor-fill,
+  .editor > .editor-text-panel,
+  .editor > .editor-touchup-panel,
+  .editor > .editor-adjustments,
+  .editor > .editor-hint { display: none !important; }
+
+  .editor-bg-row,
+  .editor-ratios,
+  .editor-fill-options { gap: 7px; }
+  .editor-bg-row button,
+  .editor-ratios button,
+  .editor-fill-options button,
+  .editor-file-button {
+    min-height: 34px;
+    padding: 7px 9px;
+    font-size: 11px;
+  }
+
+  .editor-batch-apply {
+    order: 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .editor-batch-apply button {
+    width: 100%;
+    height: 42px;
+    min-height: 38px;
+    padding: 7px 8px;
+    font-size: 11px;
+    line-height: 1.15;
+  }
+  .editor-batch-apply > .editor-hint { display: none; }
+
+  .editor-mobile-context {
+    position: fixed;
+    z-index: 78;
+    right: 8px;
+    bottom: calc(94px + env(safe-area-inset-bottom));
+    left: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    min-height: 48px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 13px;
+    border: 1px solid var(--petal-line);
+    background: rgba(255,250,253,.98);
+    box-shadow: 0 8px 24px rgba(48,32,45,.16);
+  }
+  .editor-mobile-context button,
+  .editor-mobile-file {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 7px 10px;
+    border: 1px solid #ead2e2;
+    border-radius: 9px;
+    background: #fcf1f8;
+    color: #4b3043;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .editor-mobile-context button.active { border-color: #d98bc1; background: #f3d6e9; }
+  .editor-mobile-context .editor-context-back { flex-basis: 36px; width: 36px; padding-inline: 0; font-size: 22px; }
+  .editor-mobile-context input[type='color'] { flex: 0 0 34px; width: 34px; height: 34px; padding: 2px; border: 1px solid #ead2e2; border-radius: 9px; }
+  .editor-mobile-slider {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 0 145px;
+    min-width: 145px;
+    font-size: 10px;
+  }
+  .editor-mobile-slider input { min-width: 105px; }
+
+  .editor-modes {
+    position: fixed;
+    z-index: 80;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: max(6px, env(safe-area-inset-bottom));
+    order: 99;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 4px;
+    width: auto;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--petal-line);
+    border-radius: 16px;
+    background: rgba(255,250,253,.97);
+    box-shadow: 0 12px 34px rgba(48,32,45,.22);
+    backdrop-filter: blur(12px);
+  }
+  .editor-modes::before { display: none; }
+  .editor-modes button {
+    flex: 1 0 52px;
+    min-width: 52px;
+    min-height: 54px;
+    padding: 5px 3px;
+    border: 0;
+    border-radius: 11px;
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .editor-modes button span { font-size: 17px; }
+  .editor-ribbon-spacer { display: none; }
+
+  .editor-overlay--floating .editor-library-modal,
+  .editor .editor-overlay.editor-overlay--floating > .editor-library-modal {
+    max-height: min(70dvh, 620px);
+    border-radius: 18px;
+  }
+
+  .editor-export-modal,
+  .editor-overlay .editor-save-actions {
+    width: calc(100vw - 16px);
+    max-height: 92dvh;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 390px) {
+  .editor-canvas-wrap { height: min(49dvh, 430px); }
+  .editor-brand-copy strong { font-size: 14px; }
+  .editor-header-export { padding-inline: 9px; font-size: 11px; }
+  .editor-modes button,
+  .editor-modes .editor-ribbon-action { flex-basis: 58px; min-width: 58px; }
 }
