@@ -372,9 +372,11 @@ function App() {
           <h1>Photo Studio</h1>
           <p className="app-subtitle">Prepare beautiful product photos, one thoughtful step at a time.</p>
         </div>
-        <button type="button" className="header-add" disabled>
-          Finish &amp; Export
-        </button>
+        <div className="header-quick-actions">
+          <button type="button" onClick={() => fileInputRef.current?.click()}>＋ Add</button>
+          <button type="button" disabled>↻ Reset</button>
+          <button type="button" disabled>⇩ Export</button>
+        </div>
       </header>
 
       {images.length === 0 && (
@@ -382,19 +384,11 @@ function App() {
           <aside className="empty-main-ribbon" aria-label="Main editing tools">
             <span className="empty-ribbon-title">Tools</span>
             {[
-              ['✦', 'Background'], ['⌗', 'Crop'], ['▣', 'Fit & pad'],
-              ['T', 'Text & brand'], ['✎', 'Touch-up'],
+              ['✦', 'BG'], ['⌗', 'Crop'], ['▣', 'Fit'],
+              ['Aa', 'Labels'], ['▤', 'Library'], ['◇', 'Logo'], ['✎', 'Touch-up'],
             ].map(([icon, label]) => (
               <button key={label} type="button" disabled><b>{icon}</b><span>{label}</span></button>
             ))}
-            <span className="empty-ribbon-spacer" />
-            <button type="button" onClick={() => fileInputRef.current?.click()}><b>+</b><span>Add photos</span></button>
-            <button type="button" disabled><b>↻</b><span>Reset photo</span></button>
-          </aside>
-          <aside className="empty-context-panel">
-            <p className="brand-eyebrow">Prepare photo</p>
-            <h2>Choose a tool</h2>
-            <p>Select a main tool from the ribbon. Its settings will open here.</p>
           </aside>
           <section
             className={`dropzone empty-canvas-dropzone ${isDraggingOver ? 'dropzone--active' : ''}`}
