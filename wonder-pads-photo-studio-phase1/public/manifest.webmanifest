@@ -1,0 +1,18 @@
+{
+  "name": "Wonder Pads Photo Studio",
+  "short_name": "Photo Studio",
+  "description": "Prepare Wonder Pads product photos, one at a time or in batches.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fdf8fc",
+  "theme_color": "#f8e6f2",
+  "icons": [
+    {
+      "src": "/wonder-pads-photo-studio-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
