@@ -68,6 +68,20 @@ export async function makeThumbFromCanvas(canvas, maxDimension = 480) {
   return URL.createObjectURL(blob);
 }
 
+// Same idea as makeThumbFromCanvas, but encodes as PNG so transparency
+// survives — used for the live "cutout preview" shown on a gallery card
+// right after background removal finishes, before any backdrop fill
+// gets composited on top.
+export async function makeCutoutThumbUrl(canvas, maxDimension = 480) {
+  const scale = Math.min(1, maxDimension / Math.max(canvas.width, canvas.height));
+  const thumb = document.createElement('canvas');
+  thumb.width = Math.round(canvas.width * scale);
+  thumb.height = Math.round(canvas.height * scale);
+  thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+  const blob = await new Promise((resolve) => thumb.toBlob(resolve, 'image/png'));
+  return URL.createObjectURL(blob);
+}
+
 export function downloadCanvas(canvas, filename) {
   canvas.toBlob((blob) => {
     const url = URL.createObjectURL(blob);
