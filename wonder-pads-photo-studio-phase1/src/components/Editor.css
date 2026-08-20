@@ -253,6 +253,79 @@
   cursor: pointer;
 }
 
+.editor-ratio-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+}
+
+.editor-ratio-btn-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-ratio-btn-sub {
+  font-size: 10.5px;
+  font-weight: 500;
+  opacity: 0.65;
+}
+
+.editor-ratio-btn-px {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.5;
+  letter-spacing: 0.2px;
+}
+
+.editor-fill-label--backdrop {
+  margin-top: 4px;
+}
+
+.editor-backdrop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+
+.editor-backdrop-swatch {
+  position: relative;
+  height: 56px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 0;
+}
+
+.editor-backdrop-swatch.active {
+  border-color: #b85f7d;
+  box-shadow: 0 0 0 2px #f1cfea;
+}
+
+.editor-backdrop-swatch-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #5a2e51;
+  background: rgba(255, 255, 255, 0.78);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-mobile-context .editor-backdrop-swatch {
+  height: 44px;
+  min-width: 72px;
+  flex: 0 0 auto;
+}
+
 .editor-save {
   background: #5a2e51;
   color: #fff;
