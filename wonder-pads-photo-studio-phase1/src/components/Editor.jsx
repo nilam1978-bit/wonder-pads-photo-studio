@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   RATIOS,
+  ASPECT_PRESETS,
   DEFAULT_WATERMARK,
   computeCenteredCrop,
   drawEdit,
@@ -9,6 +10,7 @@ import {
   measureTextLayers,
   filterString,
 } from '../utils/renderEdit';
+import { BACKDROP_PRESETS } from '../utils/backdrops';
 import { loadImageCanvas } from '../utils/loadImageCanvas';
 import { computeAutoEnhance } from '../utils/autoEnhance';
 import { removeBackgroundFromFile } from '../utils/removeBackground';
@@ -31,7 +33,7 @@ function makeTextId() {
 }
 
 function ratioButtonsForMode(mode) {
-  const all = ['free', '1:1', '4:5', '9:16', '16:9'];
+  const all = ['free', '1:1', '4:5', '9:16', '16:9', '3:4', '4:3'];
   return mode === 'fit' ? all.filter((k) => k !== 'free') : all;
 }
 
@@ -950,7 +952,11 @@ export default function Editor({
             <button type="button" onClick={handleAutoEnhance}>Auto</button>
           </>}
           {mobileContext === 'root' && (activeTab === 'crop' || activeTab === 'fit') && <>
-            {ratioButtonsForMode(activeTab).map((key) => <button key={key} type="button" className={ratioKey === key ? 'active' : ''} onClick={() => applyRatio(key, activeTab)}>{key === 'free' ? 'Free' : key}</button>)}
+            {ratioButtonsForMode(activeTab).map((key) => (
+              <button key={key} type="button" className={ratioKey === key ? 'active' : ''} onClick={() => applyRatio(key, activeTab)}>
+                {key === 'free' ? 'Free' : ASPECT_PRESETS[key]?.label || key}
+              </button>
+            ))}
             {activeTab === 'fit' && <button type="button" onClick={() => setMobileContext('fill')}>Fill</button>}
             <button type="button" onClick={() => setMobileContext('adjust')}>Adjust</button>
             <button type="button" onClick={handleAutoEnhance}>Auto</button>
@@ -964,8 +970,21 @@ export default function Editor({
             <input aria-label="Fill colour" type="color" value={fitFill.color || '#ffffff'} onChange={(event) => setFitFill({ type: 'color', color: event.target.value })} />
             <button type="button" onClick={() => setEyedropperActive((value) => !value)} className={eyedropperActive ? 'active' : ''}>Pick</button>
             <button type="button" onClick={() => setFitFill({ type: 'blur' })} className={fitFill.type === 'blur' ? 'active' : ''}>Blur</button>
+            <button type="button" className={fitFill.type === 'backdrop' ? 'active' : ''} onClick={() => setMobileContext('fill:backdrop')}>Backdrop</button>
             <label className="editor-mobile-file">Image<input type="file" accept="image/*" onChange={handleBackgroundImagePick} hidden /></label>
           </>}
+          {mobileContext === 'fill:backdrop' && BACKDROP_PRESETS.map((bd) => (
+            <button
+              key={bd.id}
+              type="button"
+              className={`editor-backdrop-swatch ${fitFill.type === 'backdrop' && fitFill.backdropId === bd.id ? 'active' : ''}`}
+              style={{ background: bd.swatch }}
+              title={bd.name}
+              onClick={() => { setEyedropperActive(false); setFitFill({ type: 'backdrop', backdropId: bd.id, spec: bd.spec }); }}
+            >
+              <span className="editor-backdrop-swatch-name">{bd.name}</span>
+            </button>
+          ))}
           {mobileContext === 'labels' && Object.keys(tagCategories || {}).map((category) => <button key={category} type="button" onClick={() => setMobileContext(`labels:${category}`)}>{category}</button>)}
           {mobileContext.startsWith('labels:') && (tagCategories?.[mobileContext.slice(7)] || []).map((chip) => <button key={chip} type="button" onClick={() => pickTagAsText(chip)}>{chip}</button>)}
           {mobileContext === 'logo' && <>
@@ -993,16 +1012,21 @@ export default function Editor({
 
       {(activeTab === 'crop' || activeTab === 'fit') && (
         <div className="editor-ratios">
-          {ratioButtonsForMode(activeTab).map((key) => (
-            <button
-              key={key}
-              type="button"
-              className={ratioKey === key ? 'active' : ''}
-              onClick={() => applyRatio(key, activeTab)}
-            >
-              {key === 'free' ? 'Freeform' : key}
-            </button>
-          ))}
+          {ratioButtonsForMode(activeTab).map((key) => {
+            const preset = ASPECT_PRESETS[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`editor-ratio-btn ${ratioKey === key ? 'active' : ''}`}
+                onClick={() => applyRatio(key, activeTab)}
+              >
+                <span className="editor-ratio-btn-label">{key === 'free' ? 'Freeform' : preset?.label || key}</span>
+                {preset && <span className="editor-ratio-btn-sub">{preset.sub}</span>}
+                {preset && <span className="editor-ratio-btn-px">{preset.pxLabel}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -1054,6 +1078,25 @@ export default function Editor({
             </label>
           </div>
           {eyedropperActive && <p className="editor-hint">Tap anywhere on the photo to pick that color.</p>}
+
+          <span className="editor-fill-label editor-fill-label--backdrop">Or a curated backdrop:</span>
+          <div className="editor-backdrop-grid">
+            {BACKDROP_PRESETS.map((bd) => (
+              <button
+                key={bd.id}
+                type="button"
+                className={`editor-backdrop-swatch ${fitFill.type === 'backdrop' && fitFill.backdropId === bd.id ? 'active' : ''}`}
+                style={{ background: bd.swatch }}
+                title={bd.desc}
+                onClick={() => {
+                  setEyedropperActive(false);
+                  setFitFill({ type: 'backdrop', backdropId: bd.id, spec: bd.spec });
+                }}
+              >
+                <span className="editor-backdrop-swatch-name">{bd.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
