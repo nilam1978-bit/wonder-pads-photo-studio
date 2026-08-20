@@ -1,3 +1,5 @@
+import { paintBackdrop } from './backdrops';
+
 export const DEFAULT_WATERMARK = { enabled: false, corner: 'bottom-right', scale: 0.18, opacity: 0.9 };
 
 export const DEFAULT_LOOK_EDIT_STATE = {
@@ -20,6 +22,20 @@ export const RATIOS = {
   '4:5': 4 / 5,
   '9:16': 9 / 16,
   '16:9': 16 / 9,
+  '3:4': 3 / 4,
+  '4:3': 4 / 3,
+};
+
+// Display metadata for each ratio button — what it's for, and the actual
+// export pixel size at our standard 1400px long edge. "free" is handled
+// separately in the UI since it has no fixed size to show.
+export const ASPECT_PRESETS = {
+  '1:1': { label: 'Square', sub: 'IG feed · catalog', pxLabel: '1400 × 1400' },
+  '4:5': { label: 'IG Portrait', sub: 'Feed · higher reach', pxLabel: '1120 × 1400' },
+  '9:16': { label: 'IG Reel', sub: 'Reels · Stories · TikTok', pxLabel: '788 × 1400' },
+  '16:9': { label: 'Landscape', sub: 'Web banner · YouTube', pxLabel: '1400 × 788' },
+  '3:4': { label: 'Portrait', sub: 'Pinterest', pxLabel: '1050 × 1400' },
+  '4:3': { label: 'Classic', sub: 'Product listing', pxLabel: '1400 × 1050' },
 };
 
 // Given an image's real size and a target ratio, returns the largest
@@ -61,6 +77,8 @@ export function drawBackgroundFill(ctx, fill, outWidth, outHeight) {
     const cw = iw * coverScale;
     const ch = ih * coverScale;
     ctx.drawImage(fill.imageCanvas, (outWidth - cw) / 2, (outHeight - ch) / 2, cw, ch);
+  } else if (fill?.type === 'backdrop' && fill.spec) {
+    paintBackdrop(ctx, fill.spec, outWidth, outHeight);
   } else {
     ctx.fillStyle = fill?.color || '#ffffff';
     ctx.fillRect(0, 0, outWidth, outHeight);
