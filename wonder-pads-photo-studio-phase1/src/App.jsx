@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLibrary } from './hooks/useLibrary';
 import { useWatermark } from './hooks/useWatermark';
 import { DEFAULT_LOOK_EDIT_STATE } from './utils/renderEdit';
-import { renderFullEdit, makeThumbFromCanvas, downloadCanvas } from './utils/exportImage';
+import { renderFullEdit, makeThumbFromCanvas, makeCutoutThumbUrl, downloadCanvas } from './utils/exportImage';
 import { applyRecipeToPhoto, completeEditRecipe } from './utils/editRecipe';
 import { SIZE_PRESETS, exportImagesAsZip, downloadBlob } from './utils/batchExport';
 import { buildCollage } from './utils/collage';
@@ -58,6 +58,12 @@ function App() {
   const [applyingWatermark, setApplyingWatermark] = useState(false);
   const [removingBgBatch, setRemovingBgBatch] = useState(false);
   const [bgBatchProgress, setBgBatchProgress] = useState(null);
+  // Per-item state for the live grid cards: 'processing' | 'done' | 'error'.
+  // Keyed by image id, separate from the batch-wide progress above so each
+  // card can show its own status and, on failure, its own retry button.
+  const [bgItemStatus, setBgItemStatus] = useState({});
+  const [bgItemError, setBgItemError] = useState({});
+  const [cutoutPreviewUrls, setCutoutPreviewUrls] = useState({});
   const [batchReviewIds, setBatchReviewIds] = useState([]);
   const [photoPanelView, setPhotoPanelView] = useState('photos');
   const [showTagPicker, setShowTagPicker] = useState(false);
@@ -85,6 +91,26 @@ function App() {
     }
     if (!images.some((image) => image.id === activeId)) setActiveId(images[0].id);
   }, [images, activeId]);
+
+  // Cutout preview blob URLs (used by the live grid cards) outlive the
+  // photo they were made for unless we revoke them ourselves — clean up
+  // any preview whose photo has been removed from the library.
+  useEffect(() => {
+    setCutoutPreviewUrls((prev) => {
+      const ids = new Set(images.map((image) => image.id));
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([id, url]) => {
+        if (ids.has(id)) {
+          next[id] = url;
+        } else {
+          URL.revokeObjectURL(url);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [images]);
 
   const handleFileInput = useCallback(
     (e) => {
@@ -178,18 +204,21 @@ function App() {
     setApplyingWatermark(false);
   };
 
-  // Runs AI background removal on every selected photo that doesn't
-  // already have a cached cutout, then turns "remove background" on for
-  // each — keeping whatever crop/fill/adjustments they already have.
-  // Photos are processed one at a time (not all at once), same reasoning
-  // as everywhere else in the app: a big batch shouldn't freeze the tab.
-  const handleBatchRemoveBackground = async () => {
-    const targets = images.filter((img) => img.selected);
-    if (targets.length === 0) return;
-    setRemovingBgBatch(true);
-    setBgBatchProgress({ done: 0, total: targets.length });
-    for (let i = 0; i < targets.length; i++) {
-      const img = targets[i];
+  // Runs AI background removal on one photo and updates all the
+  // per-item state a grid card needs: status pill, cutout preview
+  // (checkerboard-backed, so transparency is visible), and — on
+  // success — the saved edit/thumb, same as before. Shared by the
+  // batch loop below and by the single-item retry button on a card
+  // that failed.
+  const processBgRemovalForImage = useCallback(
+    async (img) => {
+      setBgItemStatus((prev) => ({ ...prev, [img.id]: 'processing' }));
+      setBgItemError((prev) => {
+        if (!(img.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[img.id];
+        return next;
+      });
       try {
         const cutout = img.bgRemovedCanvas || (await removeBackgroundFromFile(img.file));
         if (!img.bgRemovedCanvas) setBgRemovedCanvas(img.id, cutout);
@@ -198,14 +227,50 @@ function App() {
         const outCanvas = await renderFullEdit(img.file, editState, cutout, logoCanvas);
         const newThumbUrl = await makeThumbFromCanvas(outCanvas);
         saveEdit(img.id, editState, newThumbUrl, img.status === 'untouched' ? 'edited' : img.status);
+        const previewUrl = await makeCutoutThumbUrl(cutout);
+        setCutoutPreviewUrls((prev) => {
+          const old = prev[img.id];
+          if (old) URL.revokeObjectURL(old);
+          return { ...prev, [img.id]: previewUrl };
+        });
+        setBgItemStatus((prev) => ({ ...prev, [img.id]: 'done' }));
       } catch (err) {
         console.error(`Background removal failed for "${img.fileName}"`, err);
+        setBgItemError((prev) => ({ ...prev, [img.id]: err?.message || 'Something went wrong' }));
+        setBgItemStatus((prev) => ({ ...prev, [img.id]: 'error' }));
       }
+    },
+    [logoCanvas, saveEdit, setBgRemovedCanvas]
+  );
+
+  // Runs AI background removal on every selected photo that doesn't
+  // already have a cached cutout, then turns "remove background" on for
+  // each — keeping whatever crop/fill/adjustments they already have.
+  // Photos are processed one at a time (not all at once), same reasoning
+  // as everywhere else in the app: a big batch shouldn't freeze the tab.
+  // Per-item failures don't stop the batch — each card shows its own
+  // error and a retry button once processBgRemovalForImage catches it.
+  const handleBatchRemoveBackground = async () => {
+    const targets = images.filter((img) => img.selected);
+    if (targets.length === 0) return;
+    setRemovingBgBatch(true);
+    setBgBatchProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      await processBgRemovalForImage(targets[i]);
       setBgBatchProgress({ done: i + 1, total: targets.length });
     }
     setRemovingBgBatch(false);
     setBgBatchProgress(null);
   };
+
+  // Retries background removal for a single card after it failed.
+  const handleRetryBgItem = useCallback(
+    (id) => {
+      const img = images.find((item) => item.id === id);
+      if (img) processBgRemovalForImage(img);
+    },
+    [images, processBgRemovalForImage]
+  );
 
   // Renders every selected photo at the chosen format/size (renamed by
   // pattern if given) and bundles them into one zip download. Every photo
@@ -633,35 +698,65 @@ function App() {
               <span>{selectedCount} selected</span>
             </div>
             <div className="filmstrip">
-              {images.map((img) => (
-                <div
-                  key={img.id}
-                  className={`filmstrip-item ${img.id === activeImage.id ? 'filmstrip-item--active' : ''} ${img.selected ? 'filmstrip-item--selected' : ''}`}
-                >
-                  <button type="button" className="filmstrip-open" onClick={() => setActiveId(img.id)}>
-                    <img src={img.thumbUrl} alt={img.fileName} />
-                    <span>{img.fileName}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`thumb-check ${img.selected ? 'thumb-check--on' : ''}`}
-                    onClick={() => toggleSelect(img.id)}
-                    aria-label={img.selected ? `Deselect ${img.fileName}` : `Select ${img.fileName}`}
+              {images.map((img) => {
+                const bgStatus = bgItemStatus[img.id];
+                const showCutoutPreview = bgStatus === 'done' && cutoutPreviewUrls[img.id];
+                return (
+                  <div
+                    key={img.id}
+                    className={`filmstrip-item ${img.id === activeImage.id ? 'filmstrip-item--active' : ''} ${img.selected ? 'filmstrip-item--selected' : ''}`}
                   >
-                    {img.selected ? '✓' : ''}
-                  </button>
-                  <button
-                    type="button"
-                    className="thumb-remove"
-                    onClick={() => handleRemoveImage(img.id)}
-                    aria-label={`Remove ${img.fileName}`}
-                  >
-                    ×
-                  </button>
-                  <span className={`filmstrip-status filmstrip-status--${img.status}`}>{STATUS_LABELS[img.status]}</span>
-                </div>
-              ))}
+                    <button type="button" className="filmstrip-open" onClick={() => setActiveId(img.id)}>
+                      <span
+                        className={`filmstrip-thumb ${showCutoutPreview ? 'filmstrip-thumb--checker' : ''} ${bgStatus === 'processing' ? 'filmstrip-thumb--processing' : ''}`}
+                      >
+                        <img src={showCutoutPreview ? cutoutPreviewUrls[img.id] : img.thumbUrl} alt={img.fileName} />
+                      </span>
+                      <span>{img.fileName}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`thumb-check ${img.selected ? 'thumb-check--on' : ''}`}
+                      onClick={() => toggleSelect(img.id)}
+                      aria-label={img.selected ? `Deselect ${img.fileName}` : `Select ${img.fileName}`}
+                    >
+                      {img.selected ? '✓' : ''}
+                    </button>
+                    <button
+                      type="button"
+                      className="thumb-remove"
+                      onClick={() => handleRemoveImage(img.id)}
+                      aria-label={`Remove ${img.fileName}`}
+                    >
+                      ×
+                    </button>
+                    {bgStatus === 'processing' ? (
+                      <span className="filmstrip-status filmstrip-status--processing">Removing…</span>
+                    ) : bgStatus === 'error' ? (
+                      <span className="filmstrip-status filmstrip-status--error" title={bgItemError[img.id]}>
+                        Error
+                      </span>
+                    ) : (
+                      <span className={`filmstrip-status filmstrip-status--${img.status}`}>{STATUS_LABELS[img.status]}</span>
+                    )}
+                    {bgStatus === 'error' && (
+                      <button
+                        type="button"
+                        className="thumb-retry"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleRetryBgItem(img.id);
+                        }}
+                        title={bgItemError[img.id] || 'Retry background removal'}
+                      >
+                        ↻ Retry
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
           </section>
         </div>
       )}
