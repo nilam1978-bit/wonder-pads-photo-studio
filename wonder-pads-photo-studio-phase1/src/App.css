@@ -170,6 +170,22 @@
   cursor: pointer;
 }
 
+.thumb-retry {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 3;
+  border: none;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #a13c3c;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .thumb-name {
   position: absolute;
   bottom: 0;
@@ -856,6 +872,22 @@ textarea {
   color: #597151;
 }
 
+.filmstrip-status--processing {
+  background: #f1e6ee;
+  color: var(--wp-rose);
+  animation: filmstrip-pulse 1.3s ease-in-out infinite;
+}
+
+.filmstrip-status--error {
+  background: #fbe4e4;
+  color: #a13c3c;
+}
+
+@keyframes filmstrip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 .image-count,
 .filmstrip-heading > span {
   flex: none;
@@ -983,6 +1015,34 @@ textarea {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
+}
+
+.filmstrip-thumb {
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.filmstrip-thumb--checker {
+  background-image: conic-gradient(#e3e3e3 25%, #fff 0 50%, #e3e3e3 0 75%, #fff 0);
+  background-size: 12px 12px;
+}
+
+.filmstrip-thumb--processing img {
+  opacity: 0.55;
+}
+
+.filmstrip-thumb--processing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: filmstrip-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes filmstrip-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .filmstrip-open > span {
