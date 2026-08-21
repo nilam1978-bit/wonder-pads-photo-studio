@@ -21,6 +21,7 @@ import { SIZE_PRESETS } from '../utils/batchExport';
 import './Editor.css';
 
 const CROP_BOX = 380; // fixed square preview box used while in Crop mode
+const TOUCHUP_VIEWPORT = 380; // fixed square viewport for Touch-up, independent of output aspect so zoom/pan feel consistent
 const MIN_CROP_SIZE = 0.05; // smallest crop rect allowed, as a fraction of the image
 const HANDLE_HIT_RADIUS = 16; // px, generous so it's easy to grab on a phone
 const DEFAULT_ADJUSTMENTS = { brightness: 0, contrast: 0, saturation: 0 };
@@ -122,7 +123,22 @@ export default function Editor({
   const [brushStrokes, setBrushStrokes] = useState(initial.brushStrokes || []);
   const [brushTool, setBrushTool] = useState('blur');
   const [brushSize, setBrushSize] = useState(0.06);
+  const [brushFeather, setBrushFeather] = useState(0.3);
   const [currentStroke, setCurrentStroke] = useState(null);
+  // Undo/redo history for touch-up edits. Strokes are already stored as
+  // resolution-independent vector data (points + tool + size + feather),
+  // so "raster snapshot" isn't the right model here — instead each entry
+  // is a full snapshot of brushStrokes, taken right before the change
+  // that snapshot would undo. Simpler and cheaper than rasterizing, and
+  // gives the same undo/redo behavior.
+  const [strokeHistory, setStrokeHistory] = useState([]);
+  const [strokeFuture, setStrokeFuture] = useState([]);
+  // Touch-up viewing tools: zoom/pan let you get in close for precision
+  // brushing, invert swaps the checkerboard for a flat color so faint
+  // leftover fringe pixels are easier to spot against a solid backdrop.
+  const [touchupZoom, setTouchupZoom] = useState(1);
+  const [touchupPan, setTouchupPan] = useState({ x: 0, y: 0 });
+  const [touchupInvert, setTouchupInvert] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applyingToSelected, setApplyingToSelected] = useState(false);
   const [batchPreview, setBatchPreview] = useState(null);
@@ -137,6 +153,9 @@ export default function Editor({
   const textBoundsRef = useRef([]);
   const bgImageCanvasRef = useRef(null); // cached canvas for a custom uploaded backdrop
   const addPhotosInputRef = useRef(null);
+  const touchupContentCanvasRef = useRef(null); // offscreen: full composed image at output res, before zoom/pan
+  const isPanningTouchup = useRef(null); // { startX, startY, startPan } while dragging with the Pan tool
+  const spaceHeldRef = useRef(false); // Space held down = temporary pan, like most design tools
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +221,7 @@ export default function Editor({
       setMode(tab);
       if (tab === 'fit' && ratioKey === 'free') applyRatio('4:5', 'fit');
     }
+    if (tab === 'touchup') fitTouchupView();
   };
 
   const handleAutoEnhance = () => {
@@ -474,11 +494,85 @@ export default function Editor({
     getOutputBoxSize,
   ]);
 
+  // ---- Touch-up tab: same composed content as above, but rendered into a
+  // fixed-size viewport that the user can zoom and pan around in, for
+  // precision brush work. Strokes are still stored as 0..1 fractions of
+  // the *content* (see canvasLocalPoint below), so zoom/pan never touch
+  // how a stroke is saved — only how it's viewed while painting it. ----
+  const fitTouchupView = useCallback(() => {
+    const { w, h } = getOutputBoxSize();
+    const scale = Math.min(TOUCHUP_VIEWPORT / w, TOUCHUP_VIEWPORT / h) * 0.92;
+    setTouchupZoom(scale);
+    setTouchupPan({ x: (TOUCHUP_VIEWPORT - w * scale) / 2, y: (TOUCHUP_VIEWPORT - h * scale) / 2 });
+  }, [getOutputBoxSize]);
+
+  const drawTouchupPreview = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !drawSource) return;
+    const { w, h } = getOutputBoxSize();
+
+    let content = touchupContentCanvasRef.current;
+    if (!content) {
+      content = document.createElement('canvas');
+      touchupContentCanvasRef.current = content;
+    }
+    content.width = w;
+    content.height = h;
+    const cctx = content.getContext('2d');
+    const previewEditState = {
+      mode,
+      ratioKey,
+      crop,
+      fitFill: resolvedFill,
+      adjustments,
+      removeBackground,
+      brushStrokes: allBrushStrokes,
+      textLayers,
+      watermark: resolvedWatermark,
+    };
+    drawEdit(cctx, drawSource, drawSource.width, drawSource.height, previewEditState, w, h, sourceCanvas);
+
+    canvas.width = TOUCHUP_VIEWPORT;
+    canvas.height = TOUCHUP_VIEWPORT;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, TOUCHUP_VIEWPORT, TOUCHUP_VIEWPORT);
+
+    if (touchupInvert) {
+      ctx.fillStyle = '#7c4a6e';
+      ctx.fillRect(0, 0, TOUCHUP_VIEWPORT, TOUCHUP_VIEWPORT);
+    } else {
+      drawCheckerboard(ctx, TOUCHUP_VIEWPORT, TOUCHUP_VIEWPORT, 10);
+    }
+
+    ctx.save();
+    ctx.translate(touchupPan.x, touchupPan.y);
+    ctx.scale(touchupZoom, touchupZoom);
+    ctx.drawImage(content, 0, 0);
+    ctx.restore();
+  }, [
+    drawSource,
+    sourceCanvas,
+    mode,
+    ratioKey,
+    crop,
+    resolvedFill,
+    adjustments,
+    removeBackground,
+    allBrushStrokes,
+    textLayers,
+    resolvedWatermark,
+    getOutputBoxSize,
+    touchupPan,
+    touchupZoom,
+    touchupInvert,
+  ]);
+
   useEffect(() => {
     if (activeTab === 'crop') drawCropPreview();
     else if (activeTab === 'fit') drawFitPreview();
+    else if (activeTab === 'touchup') drawTouchupPreview();
     else drawComposedPreview();
-  }, [activeTab, drawCropPreview, drawFitPreview, drawComposedPreview]);
+  }, [activeTab, drawCropPreview, drawFitPreview, drawTouchupPreview, drawComposedPreview]);
 
   // ---- Pointer interaction: crop-mode move/resize ----
   const toImageCoords = useCallback(
@@ -684,31 +778,55 @@ export default function Editor({
   }, []);
 
   // ---- Touch-up tab: freehand brush painting ----
+  // Converts a pointer event into a 0..1 fraction of the *content* image —
+  // i.e. it undoes the current pan/zoom transform first. Strokes are
+  // always stored in this content-fraction space (see strokePathOnto in
+  // renderEdit.js), so this is the only place zoom/pan needs to be
+  // accounted for; nothing about how a stroke is saved or rendered at
+  // export time changes.
   const canvasLocalPoint = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    return {
-      x: (e.clientX - rect.left) * scaleX / canvas.width,
-      y: (e.clientY - rect.top) * scaleY / canvas.height,
-    };
+    const localX = (e.clientX - rect.left) * scaleX;
+    const localY = (e.clientY - rect.top) * scaleY;
+    const { w, h } = getOutputBoxSize();
+    const contentX = (localX - touchupPan.x) / touchupZoom;
+    const contentY = (localY - touchupPan.y) / touchupZoom;
+    return { x: contentX / w, y: contentY / h };
   };
 
   const handleBrushPointerDown = (e) => {
+    if (activeTab === 'touchup' && (brushTool === 'pan' || spaceHeldRef.current)) {
+      isPanningTouchup.current = { startX: e.clientX, startY: e.clientY, startPan: touchupPan };
+      return;
+    }
     const point = canvasLocalPoint(e);
-    setCurrentStroke({ tool: brushTool, brushSize, points: [point] });
+    setCurrentStroke({ tool: brushTool, brushSize, feather: brushFeather, points: [point] });
   };
 
   useEffect(() => {
     const handleMove = (e) => {
+      if (isPanningTouchup.current) {
+        const { startX, startY, startPan } = isPanningTouchup.current;
+        setTouchupPan({ x: startPan.x + (e.clientX - startX), y: startPan.y + (e.clientY - startY) });
+        return;
+      }
       if (!currentStroke) return;
       const point = canvasLocalPoint(e);
       setCurrentStroke((prev) => (prev ? { ...prev, points: [...prev.points, point] } : prev));
     };
     const handleUp = () => {
+      isPanningTouchup.current = null;
       setCurrentStroke((prev) => {
-        if (prev) setBrushStrokes((strokes) => [...strokes, prev]);
+        if (prev) {
+          setBrushStrokes((strokes) => {
+            setStrokeHistory((h) => [...h, strokes]);
+            setStrokeFuture([]);
+            return [...strokes, prev];
+          });
+        }
         return null;
       });
     };
@@ -721,8 +839,119 @@ export default function Editor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStroke]);
 
-  const undoLastStroke = () => setBrushStrokes((prev) => prev.slice(0, -1));
-  const clearStrokes = () => setBrushStrokes([]);
+  // Scroll-to-zoom, anchored to the cursor position so the point under
+  // the mouse stays put as you zoom in — attached as a native listener
+  // (not React's onWheel) so preventDefault actually stops page scroll.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (e) => {
+      if (activeTab !== 'touchup') return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const cx = (e.clientX - rect.left) * scaleX;
+      const cy = (e.clientY - rect.top) * scaleY;
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setTouchupZoom((prevZoom) => {
+        const newZoom = Math.max(0.15, Math.min(8, prevZoom * factor));
+        setTouchupPan((prevPan) => ({
+          x: cx - ((cx - prevPan.x) / prevZoom) * newZoom,
+          y: cy - ((cy - prevPan.y) / prevZoom) * newZoom,
+        }));
+        return newZoom;
+      });
+    };
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [activeTab]);
+
+  // Editor keyboard shortcuts, active while the Touch-up tab is open:
+  // R restore, E erase, I invert view, [ / ] brush size, hold Space to
+  // pan, ⌘Z / ⌘⇧Z undo/redo, F fit view.
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (activeTab !== 'touchup') return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === ' ') {
+        if (!e.repeat) spaceHeldRef.current = true;
+        e.preventDefault();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redoStroke();
+        else undoStroke();
+        return;
+      }
+      switch (e.key.toLowerCase()) {
+        case 'r':
+          if (removeBackground) setBrushTool('restore');
+          break;
+        case 'e':
+          if (removeBackground) setBrushTool('erase');
+          break;
+        case 'i':
+          setTouchupInvert((v) => !v);
+          break;
+        case 'f':
+          fitTouchupView();
+          break;
+        case '[':
+          setBrushSize((s) => Math.max(0.02, s - 0.01));
+          break;
+        case ']':
+          setBrushSize((s) => Math.min(0.2, s + 0.01));
+          break;
+        default:
+          break;
+      }
+    };
+    const handleKeyUp = (e) => {
+      if (e.key === ' ') spaceHeldRef.current = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [activeTab, removeBackground, undoStroke, redoStroke, fitTouchupView]);
+
+  const undoStroke = useCallback(() => {
+    setStrokeHistory((h) => {
+      if (h.length === 0) return h;
+      const prevSnapshot = h[h.length - 1];
+      setBrushStrokes((current) => {
+        setStrokeFuture((f) => [...f, current]);
+        return prevSnapshot;
+      });
+      return h.slice(0, -1);
+    });
+  }, []);
+
+  const redoStroke = useCallback(() => {
+    setStrokeFuture((f) => {
+      if (f.length === 0) return f;
+      const nextSnapshot = f[f.length - 1];
+      setBrushStrokes((current) => {
+        setStrokeHistory((h) => [...h, current]);
+        return nextSnapshot;
+      });
+      return f.slice(0, -1);
+    });
+  }, []);
+
+  const clearStrokes = useCallback(() => {
+    setBrushStrokes((strokes) => {
+      if (strokes.length === 0) return strokes;
+      setStrokeHistory((h) => [...h, strokes]);
+      setStrokeFuture([]);
+      return [];
+    });
+  }, []);
 
   const handleCanvasPointerDown = (e) => {
     if (activeTab === 'crop') handleCropPointerDown(e);
@@ -996,7 +1225,11 @@ export default function Editor({
             <button type="button" className={brushTool === 'blur' ? 'active' : ''} onClick={() => setBrushTool('blur')}>Blur</button>
             {removeBackground && <button type="button" className={brushTool === 'erase' ? 'active' : ''} onClick={() => setBrushTool('erase')}>Erase</button>}
             {removeBackground && <button type="button" className={brushTool === 'restore' ? 'active' : ''} onClick={() => setBrushTool('restore')}>Restore</button>}
-            <button type="button" onClick={undoLastStroke} disabled={!brushStrokes.length}>Undo</button>
+            <button type="button" className={brushTool === 'pan' ? 'active' : ''} onClick={() => setBrushTool('pan')}>Pan</button>
+            <button type="button" className={touchupInvert ? 'active' : ''} onClick={() => setTouchupInvert((v) => !v)}>Invert</button>
+            <button type="button" onClick={fitTouchupView}>{Math.round(touchupZoom * 100)}%</button>
+            <button type="button" onClick={undoStroke} disabled={!strokeHistory.length}>Undo</button>
+            <button type="button" onClick={redoStroke} disabled={!strokeFuture.length}>Redo</button>
             <button type="button" onClick={clearStrokes} disabled={!brushStrokes.length}>Clear</button>
           </>}
         </div>
@@ -1006,7 +1239,7 @@ export default function Editor({
         <canvas
           ref={canvasRef}
           onPointerDown={handleCanvasPointerDown}
-          className={`editor-canvas ${eyedropperActive ? 'eyedropper' : ''} ${activeTab === 'touchup' ? 'brushing' : ''}`}
+          className={`editor-canvas ${eyedropperActive ? 'eyedropper' : ''} ${activeTab === 'touchup' && brushTool === 'pan' ? 'panning' : activeTab === 'touchup' ? 'brushing' : ''}`}
         />
       </div>
 
@@ -1272,6 +1505,9 @@ export default function Editor({
                 </button>
               </>
             )}
+            <button type="button" className={brushTool === 'pan' ? 'active' : ''} onClick={() => setBrushTool('pan')}>
+              Pan
+            </button>
           </div>
           <label className="editor-slider">
             <span>Brush size</span>
@@ -1284,9 +1520,37 @@ export default function Editor({
             />
             <span className="editor-slider-value">{Math.round(brushSize * 100)}%</span>
           </label>
+          <label className="editor-slider">
+            <span>Edge softness</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(brushFeather * 100)}
+              onChange={(e) => setBrushFeather(Number(e.target.value) / 100)}
+            />
+            <span className="editor-slider-value">{Math.round(brushFeather * 100)}%</span>
+          </label>
+          <div className="editor-fill-options editor-touchup-view-controls">
+            <button type="button" className={touchupInvert ? 'active' : ''} onClick={() => setTouchupInvert((v) => !v)}>
+              Invert view
+            </button>
+            <button type="button" onClick={() => setTouchupZoom((z) => Math.max(0.15, z / 1.25))} aria-label="Zoom out">
+              −
+            </button>
+            <button type="button" onClick={fitTouchupView} className="editor-touchup-zoom-readout">
+              {Math.round(touchupZoom * 100)}%
+            </button>
+            <button type="button" onClick={() => setTouchupZoom((z) => Math.min(8, z * 1.25))} aria-label="Zoom in">
+              +
+            </button>
+          </div>
           <div className="editor-fill-options">
-            <button type="button" onClick={undoLastStroke} disabled={brushStrokes.length === 0}>
-              Undo last stroke
+            <button type="button" onClick={undoStroke} disabled={strokeHistory.length === 0}>
+              Undo
+            </button>
+            <button type="button" onClick={redoStroke} disabled={strokeFuture.length === 0}>
+              Redo
             </button>
             <button type="button" onClick={clearStrokes} disabled={brushStrokes.length === 0}>
               Clear touch-ups
@@ -1296,6 +1560,12 @@ export default function Editor({
             {brushTool === 'blur' && 'Drag over a distracting detail to soften it.'}
             {brushTool === 'erase' && 'Drag over a leftover background bit to remove it.'}
             {brushTool === 'restore' && 'Drag over a part of the subject the AI wrongly removed.'}
+            {brushTool === 'pan' && 'Drag to move around. Scroll to zoom. Tap the % to re-fit.'}
+          </p>
+          <p className="editor-hint editor-hint--shortcuts">
+            Shortcuts: <strong>R</strong> restore · <strong>E</strong> erase · <strong>I</strong> invert ·{' '}
+            <strong>[</strong>/<strong>]</strong> brush size · <strong>Space</strong> hold to pan ·{' '}
+            <strong>⌘Z</strong> undo · <strong>⌘⇧Z</strong> redo · <strong>F</strong> fit
           </p>
         </div>
       )}
