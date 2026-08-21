@@ -164,28 +164,54 @@ export function drawEdit(ctx, source, srcWidth, srcHeight, editState, outWidth, 
 // Traces each stroke's path as a thick round-cornered line (or a single
 // dot for a tap with no drag) — the shared shape used both as a visible
 // mask and as an erase path.
+// Draws each stroke's shape (circle or round-joined line) as an opaque
+// mask onto ctx. When a stroke has feather > 0, it's rendered onto its
+// own transparent canvas with a CSS blur filter first, then composited
+// in — blurring a solid white shape produces exactly the soft alpha
+// falloff a feathered brush edge needs, and it still composites cleanly
+// through whatever globalCompositeOperation the caller has set (the
+// blur happens on the source, not on the destination).
 function strokePathOnto(ctx, strokes, outWidth, outHeight) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   strokes.forEach((s) => {
-    const r = (s.brushSize * outWidth) / 2;
-    if (s.points.length <= 1) {
-      const p = s.points[0];
-      if (!p) return;
-      ctx.beginPath();
-      ctx.arc(p.x * outWidth, p.y * outHeight, r, 0, Math.PI * 2);
-      ctx.fill();
-      return;
+    const drawShape = (targetCtx) => {
+      const r = (s.brushSize * outWidth) / 2;
+      if (s.points.length <= 1) {
+        const p = s.points[0];
+        if (!p) return;
+        targetCtx.beginPath();
+        targetCtx.arc(p.x * outWidth, p.y * outHeight, r, 0, Math.PI * 2);
+        targetCtx.fill();
+        return;
+      }
+      targetCtx.lineWidth = s.brushSize * outWidth;
+      targetCtx.beginPath();
+      s.points.forEach((p, i) => {
+        const x = p.x * outWidth;
+        const y = p.y * outHeight;
+        if (i === 0) targetCtx.moveTo(x, y);
+        else targetCtx.lineTo(x, y);
+      });
+      targetCtx.stroke();
+    };
+
+    const featherPx = (s.feather || 0) * outWidth * 0.05;
+    if (featherPx > 0.5) {
+      const strokeCanvas = document.createElement('canvas');
+      strokeCanvas.width = outWidth;
+      strokeCanvas.height = outHeight;
+      const sctx = strokeCanvas.getContext('2d');
+      sctx.lineCap = 'round';
+      sctx.lineJoin = 'round';
+      sctx.fillStyle = ctx.fillStyle;
+      sctx.strokeStyle = ctx.strokeStyle;
+      sctx.filter = `blur(${featherPx}px)`;
+      drawShape(sctx);
+      ctx.drawImage(strokeCanvas, 0, 0);
+    } else {
+      drawShape(ctx);
     }
-    ctx.lineWidth = s.brushSize * outWidth;
-    ctx.beginPath();
-    s.points.forEach((p, i) => {
-      const x = p.x * outWidth;
-      const y = p.y * outHeight;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
   });
 }
 
