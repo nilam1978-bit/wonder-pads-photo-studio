@@ -12,6 +12,7 @@ import { useTextPresets } from './hooks/useTextPresets';
 import TextTagPicker from './components/TextTagPicker';
 import TextBlockLibrary from './components/TextBlockLibrary';
 import Editor from './components/Editor';
+import InstallPrompt from './components/InstallPrompt';
 import './App.css';
 
 const STATUS_LABELS = {
@@ -63,6 +64,7 @@ function App() {
   // card can show its own status and, on failure, its own retry button.
   const [bgItemStatus, setBgItemStatus] = useState({});
   const [bgItemError, setBgItemError] = useState({});
+  const [bgItemPercent, setBgItemPercent] = useState({});
   const [cutoutPreviewUrls, setCutoutPreviewUrls] = useState({});
   const [batchReviewIds, setBatchReviewIds] = useState([]);
   const [photoPanelView, setPhotoPanelView] = useState('photos');
@@ -213,6 +215,7 @@ function App() {
   const processBgRemovalForImage = useCallback(
     async (img) => {
       setBgItemStatus((prev) => ({ ...prev, [img.id]: 'processing' }));
+      setBgItemPercent((prev) => ({ ...prev, [img.id]: 0 }));
       setBgItemError((prev) => {
         if (!(img.id in prev)) return prev;
         const next = { ...prev };
@@ -220,7 +223,11 @@ function App() {
         return next;
       });
       try {
-        const cutout = img.bgRemovedCanvas || (await removeBackgroundFromFile(img.file));
+        const cutout =
+          img.bgRemovedCanvas ||
+          (await removeBackgroundFromFile(img.file, (percent) => {
+            setBgItemPercent((prev) => ({ ...prev, [img.id]: percent }));
+          }));
         if (!img.bgRemovedCanvas) setBgRemovedCanvas(img.id, cutout);
         const base = img.editState || DEFAULT_LOOK_EDIT_STATE;
         const editState = { ...base, removeBackground: true };
@@ -430,6 +437,7 @@ function App() {
 
   return (
     <div className={`app ${images.length === 0 ? 'app--empty' : ''}`}>
+      <InstallPrompt />
       <header className="app-header">
         <div className="brand-mark"><img src="/wonder-pads-photo-studio-icon.png" alt="" /></div>
         <div>
@@ -731,7 +739,9 @@ function App() {
                       ×
                     </button>
                     {bgStatus === 'processing' ? (
-                      <span className="filmstrip-status filmstrip-status--processing">Removing…</span>
+                      <span className="filmstrip-status filmstrip-status--processing">
+                        {bgItemPercent[img.id] ? `${bgItemPercent[img.id]}%` : 'Removing…'}
+                      </span>
                     ) : bgStatus === 'error' ? (
                       <span className="filmstrip-status filmstrip-status--error" title={bgItemError[img.id]}>
                         Error
