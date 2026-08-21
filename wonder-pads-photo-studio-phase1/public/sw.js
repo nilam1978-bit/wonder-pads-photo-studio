@@ -37,14 +37,21 @@ self.addEventListener('fetch', (event) => {
 
   if (isSameOrigin) {
     event.respondWith(
-      caches.match(req).then(
-        (cached) =>
-          cached ||
-          fetch(req).then((res) => {
-            if (res.ok) caches.open(APP_CACHE).then((c) => c.put(req, res.clone()));
-            return res;
-          })
-      )
+      caches.match(req).then((cached) => {
+        if (cached) return cached;
+        return fetch(req).then((res) => {
+          // Clone immediately, synchronously — before anything else can
+          // start reading the response body. Deferring the clone (e.g.
+          // inside a nested caches.open().then()) risks losing the race
+          // against the browser's own consumption of `res`, which throws
+          // "Failed to execute 'clone': body is already used".
+          if (res.ok) {
+            const resToCache = res.clone();
+            caches.open(APP_CACHE).then((c) => c.put(req, resToCache));
+          }
+          return res;
+        });
+      })
     );
     return;
   }
