@@ -160,6 +160,29 @@
   cursor: crosshair;
 }
 
+.editor-canvas.panning {
+  cursor: grab;
+}
+
+.editor-canvas.panning:active {
+  cursor: grabbing;
+}
+
+.editor-touchup-view-controls {
+  align-items: center;
+}
+
+.editor-touchup-zoom-readout {
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-hint--shortcuts {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .editor-back {
   background: none;
   border: none;
