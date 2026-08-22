@@ -221,7 +221,6 @@ export default function Editor({
       setMode(tab);
       if (tab === 'fit' && ratioKey === 'free') applyRatio('4:5', 'fit');
     }
-    if (tab === 'touchup') fitTouchupView();
   };
 
   const handleAutoEnhance = () => {
@@ -505,6 +504,17 @@ export default function Editor({
     setTouchupZoom(scale);
     setTouchupPan({ x: (TOUCHUP_VIEWPORT - w * scale) / 2, y: (TOUCHUP_VIEWPORT - h * scale) / 2 });
   }, [getOutputBoxSize]);
+
+  // Re-fit the touch-up view whenever that tab is opened. This lives as
+  // its own effect (rather than being called directly from
+  // handleTabChange, which is declared much earlier in this component)
+  // so it never depends on where fitTouchupView happens to sit in the
+  // file — effects only ever run after the full component body has
+  // finished executing, so this is always safe.
+  useEffect(() => {
+    if (activeTab === 'touchup') fitTouchupView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const drawTouchupPreview = useCallback(() => {
     const canvas = canvasRef.current;
