@@ -9,13 +9,21 @@
 // file to occasionally hand back a corrupted response for one of the
 // app's own JS files and crash the page.
 //
+// Only same-origin requests are handled — the RMBG-1.4 model weights
+// download from Hugging Face's CDN via a redirect
+// (.../resolve/main/...), and a service worker re-fetching a redirected
+// cross-origin request is a known way to break CORS on a request that
+// works fine unintercepted. Offline caching of the model was a
+// nice-to-have; it's not worth breaking background removal over, so
+// those requests are left alone entirely and go straight to the network
+// exactly as if no service worker existed.
+//
 // Vite's build produces content-hashed filenames, so there's no fixed
 // file list to precache here — the cache fills in naturally as files are
 // requested, same as v1.
 
-const VERSION = 'wp-photo-studio-v2';
+const VERSION = 'wp-photo-studio-v3';
 const APP_CACHE = `app-${VERSION}`;
-const MODEL_CACHE = `model-${VERSION}`;
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -25,7 +33,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== APP_CACHE && k !== MODEL_CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== APP_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -35,21 +43,16 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
-  const isSameOrigin = url.origin === self.location.origin;
-  const isModelCDN = /huggingface\.co|hf\.co|cdn-lfs/i.test(url.hostname);
-  if (!isSameOrigin && !isModelCDN) return; // let the browser handle anything else as normal
+  if (url.origin !== self.location.origin) return; // let the browser handle cross-origin requests as normal
 
   event.respondWith(
     (async () => {
       try {
         const res = await fetch(req);
-        // Cache a copy in the background, but never let caching affect
-        // what the page actually gets back — and never let a caching
-        // failure turn into a broken/rejected response for the page.
         if (res && res.ok) {
           const copy = res.clone();
           caches
-            .open(isSameOrigin ? APP_CACHE : MODEL_CACHE)
+            .open(APP_CACHE)
             .then((cache) => cache.put(req, copy))
             .catch(() => {});
         }
@@ -57,8 +60,6 @@ self.addEventListener('fetch', (event) => {
       } catch {
         const cached = await caches.match(req);
         if (cached) return cached;
-        // No cache and the network failed — let the browser show its
-        // normal offline error rather than us throwing here.
         return fetch(req);
       }
     })()
