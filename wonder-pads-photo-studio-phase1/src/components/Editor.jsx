@@ -877,9 +877,47 @@ export default function Editor({
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [activeTab]);
 
+  const undoStroke = useCallback(() => {
+    setStrokeHistory((h) => {
+      if (h.length === 0) return h;
+      const prevSnapshot = h[h.length - 1];
+      setBrushStrokes((current) => {
+        setStrokeFuture((f) => [...f, current]);
+        return prevSnapshot;
+      });
+      return h.slice(0, -1);
+    });
+  }, []);
+
+  const redoStroke = useCallback(() => {
+    setStrokeFuture((f) => {
+      if (f.length === 0) return f;
+      const nextSnapshot = f[f.length - 1];
+      setBrushStrokes((current) => {
+        setStrokeHistory((h) => [...h, current]);
+        return nextSnapshot;
+      });
+      return f.slice(0, -1);
+    });
+  }, []);
+
+  const clearStrokes = useCallback(() => {
+    setBrushStrokes((strokes) => {
+      if (strokes.length === 0) return strokes;
+      setStrokeHistory((h) => [...h, strokes]);
+      setStrokeFuture([]);
+      return [];
+    });
+  }, []);
+
   // Editor keyboard shortcuts, active while the Touch-up tab is open:
   // R restore, E erase, I invert view, [ / ] brush size, hold Space to
-  // pan, ⌘Z / ⌘⇧Z undo/redo, F fit view.
+  // pan, ⌘Z / ⌘⇧Z undo/redo, F fit view. This effect must come after
+  // undoStroke/redoStroke/fitTouchupView are declared above — its
+  // dependency array reads their current values immediately as part of
+  // render, unlike a function body (which only runs later, on a real
+  // key press), so declaring it any earlier is a genuine
+  // temporal-dead-zone bug, not just a style nit.
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (activeTab !== 'touchup') return;
@@ -929,39 +967,6 @@ export default function Editor({
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [activeTab, removeBackground, undoStroke, redoStroke, fitTouchupView]);
-
-  const undoStroke = useCallback(() => {
-    setStrokeHistory((h) => {
-      if (h.length === 0) return h;
-      const prevSnapshot = h[h.length - 1];
-      setBrushStrokes((current) => {
-        setStrokeFuture((f) => [...f, current]);
-        return prevSnapshot;
-      });
-      return h.slice(0, -1);
-    });
-  }, []);
-
-  const redoStroke = useCallback(() => {
-    setStrokeFuture((f) => {
-      if (f.length === 0) return f;
-      const nextSnapshot = f[f.length - 1];
-      setBrushStrokes((current) => {
-        setStrokeHistory((h) => [...h, current]);
-        return nextSnapshot;
-      });
-      return f.slice(0, -1);
-    });
-  }, []);
-
-  const clearStrokes = useCallback(() => {
-    setBrushStrokes((strokes) => {
-      if (strokes.length === 0) return strokes;
-      setStrokeHistory((h) => [...h, strokes]);
-      setStrokeFuture([]);
-      return [];
-    });
-  }, []);
 
   const handleCanvasPointerDown = (e) => {
     if (activeTab === 'crop') handleCropPointerDown(e);
