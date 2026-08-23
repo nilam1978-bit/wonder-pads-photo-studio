@@ -244,7 +244,13 @@ function applyBrushStrokes(ctx, editState, source, originalSource, srcWidth, src
     restored.width = outWidth;
     restored.height = outHeight;
     const rctx = restored.getContext('2d');
-    drawFramedPhotoOnly(rctx, originalSource, srcWidth, srcHeight, editState, outWidth, outHeight);
+    // Use originalSource's OWN dimensions here, not the cutout's
+    // (srcWidth/srcHeight belong to `source`, which can be a different
+    // resolution — the live editor's preview canvas is capped at 1000px
+    // while the cutout is full-resolution). Sampling with the wrong
+    // canvas's dimensions stretches/misaligns the restored area into a
+    // blurry, offset patch instead of the crisp original pixels.
+    drawFramedPhotoOnly(rctx, originalSource, originalSource.width, originalSource.height, editState, outWidth, outHeight);
     rctx.globalCompositeOperation = 'destination-in';
     rctx.fillStyle = '#fff';
     rctx.strokeStyle = '#fff';
