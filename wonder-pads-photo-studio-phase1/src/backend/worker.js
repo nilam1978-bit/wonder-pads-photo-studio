@@ -23,11 +23,25 @@ export default {
     if (url.pathname.startsWith('/hf-proxy/')) {
       const targetPath = url.pathname.slice('/hf-proxy/'.length);
       const targetUrl = `https://huggingface.co/${targetPath}${url.search}`;
+
+      // Build a clean, minimal header set for the outbound request rather
+      // than forwarding the browser's original headers verbatim — those
+      // include this Worker's own Host/Origin, which huggingface.co has no
+      // reason to expect and can cause it to route or reject the request
+      // unexpectedly. Only Range (for partial/resumed downloads) and
+      // Accept are worth carrying over.
+      const proxyHeaders = new Headers();
+      const range = request.headers.get('Range');
+      if (range) proxyHeaders.set('Range', range);
+      const accept = request.headers.get('Accept');
+      if (accept) proxyHeaders.set('Accept', accept);
+
       const upstream = await fetch(targetUrl, {
         method: request.method,
-        headers: request.headers,
+        headers: proxyHeaders,
         redirect: 'follow',
       });
+
       // Same-origin response to the browser — no CORS headers needed,
       // since this is no longer a cross-origin request from its perspective.
       return new Response(upstream.body, {
