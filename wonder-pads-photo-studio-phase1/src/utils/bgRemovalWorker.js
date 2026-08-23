@@ -22,6 +22,18 @@ const MODEL_ID = 'briaai/RMBG-1.4';
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+// Route model downloads through our own Worker's /hf-proxy/ route instead
+// of hitting huggingface.co directly from the browser — see
+// src/backend/worker.js for why (a cross-origin CORS block specific to
+// this deployment's origin). remotePathTemplate is left at its default
+// ('{model}/resolve/{revision}/{file}'), which is exactly the path shape
+// the proxy expects after stripping the '/hf-proxy/' prefix.
+// Note: this only works where the Worker proxy route actually exists
+// (the deployed site) — background removal won't reach the model during
+// local `npm run dev`, since Vite's dev server doesn't run worker.js.
+if (typeof self !== 'undefined' && self.location) {
+  env.remoteHost = `${self.location.origin}/hf-proxy`;
+}
 
 let model = null;
 let processor = null;
