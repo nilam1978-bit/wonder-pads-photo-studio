@@ -139,6 +139,9 @@ export default function Editor({
   const [touchupZoom, setTouchupZoom] = useState(1);
   const [touchupPan, setTouchupPan] = useState({ x: 0, y: 0 });
   const [touchupInvert, setTouchupInvert] = useState(false);
+  // Live brush-size cursor circle, tracked in viewport pixel space —
+  // lets you see exactly what you're about to paint before you click.
+  const [touchupCursor, setTouchupCursor] = useState({ x: -999, y: -999, visible: false });
   const [saving, setSaving] = useState(false);
   const [applyingToSelected, setApplyingToSelected] = useState(false);
   const [batchPreview, setBatchPreview] = useState(null);
@@ -516,11 +519,14 @@ export default function Editor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  const drawTouchupPreview = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !drawSource) return;
+  // Recomputes the offscreen composed content — call only when the actual
+  // edit changes (crop/fill/adjustments/strokes/text/removeBackground).
+  // Deliberately excludes pan/zoom/invert/cursor: those never change what's
+  // being drawn, only how it's viewed, so redoing this full composite for
+  // them would be wasted work on every scroll-to-zoom tick or mouse move.
+  const recomputeTouchupContent = useCallback(() => {
+    if (!drawSource) return;
     const { w, h } = getOutputBoxSize();
-
     let content = touchupContentCanvasRef.current;
     if (!content) {
       content = document.createElement('canvas');
@@ -541,7 +547,29 @@ export default function Editor({
       watermark: resolvedWatermark,
     };
     drawEdit(cctx, drawSource, drawSource.width, drawSource.height, previewEditState, w, h, sourceCanvas);
+  }, [
+    drawSource,
+    sourceCanvas,
+    mode,
+    ratioKey,
+    crop,
+    resolvedFill,
+    adjustments,
+    removeBackground,
+    allBrushStrokes,
+    textLayers,
+    resolvedWatermark,
+    getOutputBoxSize,
+  ]);
 
+  // Cheap: repaints the fixed viewport from the already-rendered content
+  // canvas above, plus the checkerboard/invert background and the live
+  // brush-size cursor circle. Runs on every pan/zoom/cursor-move/tool
+  // change — never touches the expensive recompute above.
+  const repaintTouchupViewport = useCallback(() => {
+    const canvas = canvasRef.current;
+    const content = touchupContentCanvasRef.current;
+    if (!canvas || !content) return;
     canvas.width = TOUCHUP_VIEWPORT;
     canvas.height = TOUCHUP_VIEWPORT;
     const ctx = canvas.getContext('2d');
@@ -559,30 +587,43 @@ export default function Editor({
     ctx.scale(touchupZoom, touchupZoom);
     ctx.drawImage(content, 0, 0);
     ctx.restore();
-  }, [
-    drawSource,
-    sourceCanvas,
-    mode,
-    ratioKey,
-    crop,
-    resolvedFill,
-    adjustments,
-    removeBackground,
-    allBrushStrokes,
-    textLayers,
-    resolvedWatermark,
-    getOutputBoxSize,
-    touchupPan,
-    touchupZoom,
-    touchupInvert,
-  ]);
+
+    if (touchupCursor.visible && brushTool !== 'pan') {
+      const { w } = getOutputBoxSize();
+      const radiusPx = (brushSize * w * touchupZoom) / 2;
+      const isRestore = brushTool === 'restore';
+      ctx.save();
+      ctx.strokeStyle = isRestore ? 'rgba(80,160,110,.95)' : 'rgba(200,80,120,.95)';
+      ctx.fillStyle = isRestore ? 'rgba(80,160,110,.10)' : 'rgba(200,80,120,.10)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(touchupCursor.x, touchupCursor.y, radiusPx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [touchupPan, touchupZoom, touchupInvert, touchupCursor, brushTool, brushSize, getOutputBoxSize]);
 
   useEffect(() => {
     if (activeTab === 'crop') drawCropPreview();
     else if (activeTab === 'fit') drawFitPreview();
-    else if (activeTab === 'touchup') drawTouchupPreview();
-    else drawComposedPreview();
-  }, [activeTab, drawCropPreview, drawFitPreview, drawTouchupPreview, drawComposedPreview]);
+    else if (activeTab === 'touchup') {
+      recomputeTouchupContent();
+      repaintTouchupViewport();
+    } else drawComposedPreview();
+    // repaintTouchupViewport is intentionally not a dependency here — its
+    // own effect below handles pan/zoom/cursor-only repaints so this
+    // effect isn't re-triggered (and the expensive recompute re-run) by
+    // every zoom tick or mouse move.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, drawCropPreview, drawFitPreview, recomputeTouchupContent, drawComposedPreview]);
+
+  // Cheap repaint-only effect: pan, zoom, invert, cursor position, brush
+  // tool/size — none of these change the actual edit, only how it's
+  // viewed or where the cursor preview sits.
+  useEffect(() => {
+    if (activeTab === 'touchup') repaintTouchupViewport();
+  }, [activeTab, touchupPan, touchupZoom, touchupInvert, touchupCursor, brushTool, brushSize, repaintTouchupViewport]);
 
   // ---- Pointer interaction: crop-mode move/resize ----
   const toImageCoords = useCallback(
@@ -975,6 +1016,29 @@ export default function Editor({
     else if (activeTab === 'text') handleTextPointerDown(e);
   };
 
+  // Tracks the cursor in viewport pixel space while hovering the Touch-up
+  // canvas, so repaintTouchupViewport can draw the live brush-size circle
+  // there. This is separate from the drag-to-paint pointermove listener —
+  // it needs to fire on plain hover too, not just while a stroke is active.
+  const handleCanvasHoverMove = (e) => {
+    if (activeTab !== 'touchup') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    setTouchupCursor({
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+      visible: true,
+    });
+  };
+
+  const handleCanvasHoverLeave = () => {
+    if (activeTab !== 'touchup') return;
+    setTouchupCursor((c) => ({ ...c, visible: false }));
+  };
+
   const handleLogoPick = (e) => {
     const file = e.target.files?.[0];
     if (file) onSetLogo(file);
@@ -1116,6 +1180,9 @@ export default function Editor({
   return (
     <div className={`editor ${activeTab ? `editor--${activeTab}` : ''}`}>
       <div className="editor-topbar">
+        <button type="button" className="editor-back-to-gallery" onClick={onClose} aria-label="Back to gallery">
+          ← Gallery
+        </button>
         <div className="editor-brand-mark"><img src="/wonder-pads-photo-studio-icon.png" alt="" /></div>
         <div className="editor-brand-copy"><span>Wonder Pads Reusables</span><strong>Photo Studio</strong></div>
         <span className="editor-filename">{image.fileName}</span>
@@ -1254,6 +1321,8 @@ export default function Editor({
         <canvas
           ref={canvasRef}
           onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasHoverMove}
+          onPointerLeave={handleCanvasHoverLeave}
           className={`editor-canvas ${eyedropperActive ? 'eyedropper' : ''} ${activeTab === 'touchup' && brushTool === 'pan' ? 'panning' : activeTab === 'touchup' ? 'brushing' : ''}`}
         />
       </div>
