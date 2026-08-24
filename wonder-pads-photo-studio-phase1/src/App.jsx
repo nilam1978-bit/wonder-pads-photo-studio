@@ -29,6 +29,15 @@ const GRID_OPTIONS = [
   { cols: 3, rows: 3 },
 ];
 
+// Simplifies a pixel width/height into a small ratio label like "4:3" —
+// matches genspark's per-card ratio display in the gallery grid.
+function simplifyRatio(w, h) {
+  if (!w || !h) return '';
+  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+  const d = gcd(w, h) || 1;
+  return `${Math.round(w / d)}:${Math.round(h / d)}`;
+}
+
 function App() {
   const {
     images,
@@ -385,7 +394,10 @@ function App() {
 
   const activeImage = images.find((img) => img.id === activeId) || images[0] || null;
   const editingImage = images.find((img) => img.id === editingId);
-  const workspaceImage = editingImage || activeImage;
+  // Only editingImage — no fallback to activeImage. The gallery grid is
+  // the primary view; the editor only opens when a photo is explicitly
+  // clicked into, and returns to the gallery on close.
+  const workspaceImage = editingImage;
 
   if (workspaceImage) {
     return (
@@ -666,37 +678,6 @@ function App() {
 
       {activeImage && (
         <div className="studio-workspace">
-          <main className="studio-stage">
-            <div className="stage-heading">
-              <div>
-                <span className={`status-pill status-pill--${activeImage.status}`}>
-                  {STATUS_LABELS[activeImage.status]}
-                </span>
-                <h2>{activeImage.fileName}</h2>
-              </div>
-              <span className="image-count">
-                {images.findIndex((image) => image.id === activeImage.id) + 1} of {images.length}
-              </span>
-            </div>
-
-            <button type="button" className="canvas-stage" onClick={() => setEditingId(activeImage.id)}>
-              <img src={activeImage.thumbUrl} alt={activeImage.fileName} />
-              <span className="canvas-edit-hint">Tap to edit photo</span>
-            </button>
-
-            <div className="stage-actions">
-              <button type="button" className="primary-action" onClick={() => setEditingId(activeImage.id)}>
-                Edit this photo
-              </button>
-              <button type="button" onClick={() => toggleSelect(activeImage.id)}>
-                {activeImage.selected ? '✓ Selected for batch' : 'Select for batch'}
-              </button>
-              <button type="button" className="quiet-danger" onClick={() => handleRemoveImage(activeImage.id)}>
-                Remove
-              </button>
-            </div>
-          </main>
-
           <section className="filmstrip-panel" aria-label="Uploaded photos">
             <div className="filmstrip-heading">
               <div>
@@ -709,18 +690,32 @@ function App() {
               {images.map((img) => {
                 const bgStatus = bgItemStatus[img.id];
                 const showCutoutPreview = bgStatus === 'done' && cutoutPreviewUrls[img.id];
+                const percent = bgItemPercent[img.id] || 0;
                 return (
                   <div
                     key={img.id}
                     className={`filmstrip-item ${img.id === activeImage.id ? 'filmstrip-item--active' : ''} ${img.selected ? 'filmstrip-item--selected' : ''}`}
                   >
-                    <button type="button" className="filmstrip-open" onClick={() => setActiveId(img.id)}>
-                      <span
-                        className={`filmstrip-thumb ${showCutoutPreview ? 'filmstrip-thumb--checker' : ''} ${bgStatus === 'processing' ? 'filmstrip-thumb--processing' : ''}`}
-                      >
-                        <img src={showCutoutPreview ? cutoutPreviewUrls[img.id] : img.thumbUrl} alt={img.fileName} />
+                    <button
+                      type="button"
+                      className="filmstrip-open"
+                      onClick={() => {
+                        setActiveId(img.id);
+                        setEditingId(img.id);
+                      }}
+                    >
+                      <span className="filmstrip-thumb filmstrip-thumb--checker">
+                        <img
+                          src={showCutoutPreview ? cutoutPreviewUrls[img.id] : img.thumbUrl}
+                          alt={img.fileName}
+                          className="filmstrip-thumb-img"
+                        />
+                        {bgStatus === 'processing' && (
+                          <span className="filmstrip-progress-track">
+                            <span className="filmstrip-progress-fill" style={{ width: `${percent}%` }} />
+                          </span>
+                        )}
                       </span>
-                      <span>{img.fileName}</span>
                     </button>
                     <button
                       type="button"
@@ -740,7 +735,7 @@ function App() {
                     </button>
                     {bgStatus === 'processing' ? (
                       <span className="filmstrip-status filmstrip-status--processing">
-                        {bgItemPercent[img.id] ? `${bgItemPercent[img.id]}%` : 'Removing…'}
+                        {percent ? `${percent}%` : 'Removing…'}
                       </span>
                     ) : bgStatus === 'error' ? (
                       <span className="filmstrip-status filmstrip-status--error" title={bgItemError[img.id]}>
@@ -762,9 +757,24 @@ function App() {
                         ↻ Retry
                       </button>
                     )}
+                    <div className="filmstrip-meta">
+                      <span className="filmstrip-meta-name">{img.fileName}</span>
+                      {img.fullWidth && img.fullHeight && (
+                        <span className="filmstrip-meta-dims">
+                          <span>
+                            {img.fullWidth}×{img.fullHeight}
+                          </span>
+                          <span>{simplifyRatio(img.fullWidth, img.fullHeight)}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
+              <button type="button" className="filmstrip-add-tile" onClick={() => fileInputRef.current?.click()}>
+                <span className="filmstrip-add-tile-icon">＋</span>
+                <span>Add photos</span>
+              </button>
             </div>
 
           </section>
