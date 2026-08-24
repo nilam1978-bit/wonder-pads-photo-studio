@@ -808,10 +808,7 @@ textarea {
 }
 
 .studio-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 18px;
-  align-items: start;
+  display: block;
 }
 
 .studio-stage,
@@ -963,8 +960,6 @@ textarea {
 }
 
 .filmstrip-panel {
-  position: sticky;
-  top: 16px;
   padding: 14px;
 }
 
@@ -975,10 +970,8 @@ textarea {
 
 .filmstrip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-  max-height: calc(100vh - 190px);
-  overflow-y: auto;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
   padding: 2px 4px 4px 2px;
 }
 
@@ -986,18 +979,20 @@ textarea {
   position: relative;
   overflow: hidden;
   border: 2px solid transparent;
-  border-radius: 12px;
-  background: #f4ecef;
-  transition: border-color 0.15s, transform 0.15s;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(91, 58, 82, 0.08);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 
 .filmstrip-item--active {
-  border-color: var(--wp-plum);
+  border-color: var(--wp-rose);
+  box-shadow: 0 8px 24px rgba(184, 95, 125, 0.2);
   transform: translateY(-1px);
 }
 
 .filmstrip-item--selected:not(.filmstrip-item--active) {
-  border-color: var(--wp-lilac-deep);
+  border-color: var(--wp-sage);
 }
 
 .filmstrip-open {
@@ -1010,50 +1005,65 @@ textarea {
   cursor: pointer;
 }
 
-.filmstrip-open img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-}
-
 .filmstrip-thumb {
   display: block;
   position: relative;
   overflow: hidden;
+  aspect-ratio: 1;
 }
 
 .filmstrip-thumb--checker {
-  background-image: conic-gradient(#e3e3e3 25%, #fff 0 50%, #e3e3e3 0 75%, #fff 0);
-  background-size: 12px 12px;
+  background-image: conic-gradient(#f1ede8 25%, #fff 0 50%, #f1ede8 0 75%, #fff 0);
+  background-size: 16px 16px;
 }
 
-.filmstrip-thumb--processing img {
-  opacity: 0.55;
-}
-
-.filmstrip-thumb--processing::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  animation: filmstrip-shimmer 1.3s ease-in-out infinite;
-}
-
-@keyframes filmstrip-shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.filmstrip-open > span {
+.filmstrip-thumb-img {
   display: block;
+  width: 100%;
+  height: 100%;
+  /* "contain" (not "cover") so the whole photo is always visible,
+     uncropped, on the checkerboard — matches how the source prototype
+     showed uploaded photos, rather than filling/cropping the square. */
+  object-fit: contain;
+}
+
+.filmstrip-progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.filmstrip-progress-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--wp-lilac-deep), var(--wp-rose));
+  transition: width 0.3s ease;
+}
+
+.filmstrip-meta {
+  padding: 8px 10px 22px;
   overflow: hidden;
-  padding: 7px 7px 22px;
-  font-size: 9px;
+}
+
+.filmstrip-meta-name {
+  display: block;
+  font-size: 12px;
   font-weight: 700;
-  text-align: left;
-  text-overflow: ellipsis;
+  color: var(--wp-plum);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filmstrip-meta-dims {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--wp-plum-soft);
 }
 
 .filmstrip-status {
@@ -1070,6 +1080,39 @@ textarea {
   z-index: 2;
 }
 
+.filmstrip-add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  border: 1.5px dashed rgba(184, 95, 125, 0.35);
+  background: linear-gradient(160deg, #fefafc 0%, #fbeef6 100%);
+  color: var(--wp-rose);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.filmstrip-add-tile:hover {
+  transform: translateY(-1px);
+}
+
+.filmstrip-add-tile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(184, 95, 125, 0.15);
+  font-size: 18px;
+}
+
 .preset-picker {
   border-color: var(--wp-thread);
   background: var(--wp-card);
@@ -1083,24 +1126,9 @@ textarea {
 }
 
 @media (max-width: 900px) {
-  .studio-workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .filmstrip-panel {
-    position: static;
-  }
-
   .filmstrip {
-    display: flex;
-    max-height: none;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 8px;
-  }
-
-  .filmstrip-item {
-    flex: 0 0 112px;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
   }
 }
 
