@@ -21,6 +21,21 @@
 }
 
 .editor-brand-mark { display: none; }
+.editor-back-to-gallery {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #e7bfd9;
+  background: #faeaf5;
+  color: #6a3557;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.editor-back-to-gallery:hover { border-color: #d98bc1; background: #f3d6e9; }
 .editor-quick-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .editor-quick-actions button { white-space: nowrap; }
 .editor-quick-actions button:not(.editor-header-export) { border: 1px solid #e7bfd9; background: #faeaf5; color: #6a3557; }
