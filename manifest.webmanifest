@@ -1,0 +1,20 @@
+{
+  "name": "Wonder Pads Reusables — Photoshoot Studio",
+  "short_name": "Wonder Pads Studio",
+  "description": "Client-side product photo studio for Wonder Pads Reusables. Auto-removes backgrounds and composites on-brand studio backdrops — 100% in your browser.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "prefer_related_applications": false,
+  "background_color": "#FFFEFD",
+  "theme_color": "#F1CFEA",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "categories": ["photo", "productivity", "business"]
+}
