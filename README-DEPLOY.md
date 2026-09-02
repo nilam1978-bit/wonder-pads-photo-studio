@@ -27,3 +27,4 @@ Use **Save to Gallery** for every finished pattern piece. In Saved Gallery, sele
 Use one finger to select and drag vector nodes or Bézier handles, and two fingers to zoom. The quick ribbon scrolls horizontally when necessary. The Cutout Editor Restore brush uses a brush-sized reusable canvas to avoid mobile Safari memory spikes.
 
 Press Escape or the Close button to leave the focused canvas modal.
+
