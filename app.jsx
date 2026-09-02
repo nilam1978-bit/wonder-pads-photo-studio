@@ -84,19 +84,9 @@ const Overview = ({onGoto}) => {
   </div>;
 };
 
-const galleryPathFor = (nodes=[]) => {
-  if (nodes.length < 3) return '';
-  let d = `M ${nodes[0].x} ${nodes[0].y}`;
-  for (let i=0;i<nodes.length;i++) {
-    const a=nodes[i], b=nodes[(i+1)%nodes.length];
-    if(a.kind==='sharp'&&b.kind==='sharp') d+=` L ${b.x} ${b.y}`;
-    else { const c1=a.kind==='smooth'?a.handleOut:a,c2=b.kind==='smooth'?b.handleIn:b; d+=` C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`; }
-  }
-  return d+' Z';
-};
-
-const PatternJoiner = ({shots,onClose}) => {
-  const [pieces,setPieces]=React.useState(()=>shots.map((shot,i)=>({shot,x:250+i*300,y:400,rotation:0,scale:.34,flipX:1,flipY:1})));
+const patternPathFor = (nodes=[]) => { if(nodes.length<3)return ''; let d=`M ${nodes[0].x} ${nodes[0].y}`; for(let i=0;i<nodes.length;i++){const a=nodes[i],b=nodes[(i+1)%nodes.length]; if(a.kind==='sharp'&&b.kind==='sharp') d+=` L ${b.x} ${b.y}`; else {const c1=a.kind==='smooth'?a.handleOut:a,c2=b.kind==='smooth'?b.handleIn:b; d+=` C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;}} return d+' Z'; };
+const PatternJoiner = ({parts,onClose}) => {
+  const [pieces,setPieces]=React.useState(()=>parts.map((part,i)=>({part,x:260+i*220,y:380,rotation:0,scale:.42,flipX:1,flipY:1})));
   const [active,setActive]=React.useState(0),drag=React.useRef(null),svgRef=React.useRef(null);
   const update=(patch)=>setPieces(cur=>cur.map((p,i)=>i===active?{...p,...patch}:p));
   const pointer=(e)=>{const r=svgRef.current.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*1000,y:(e.clientY-r.top)/r.height*800};};
@@ -104,35 +94,31 @@ const PatternJoiner = ({shots,onClose}) => {
   const move=(e)=>{if(!drag.current)return;const p=pointer(e),d=drag.current;setPieces(cur=>cur.map((piece,i)=>i===d.i?{...piece,x:d.origin.x+p.x-d.start.x,y:d.origin.y+p.y-d.start.y}:piece));};
   const up=()=>{drag.current=null;};
   const transform=(piece)=>`translate(${piece.x} ${piece.y}) rotate(${piece.rotation}) scale(${piece.scale*piece.flipX} ${piece.scale*piece.flipY}) translate(-360 -640)`;
-  const exportJoined=()=>{const groups=pieces.map(piece=>`<g transform="${transform(piece)}"><path d="${galleryPathFor(piece.shot.silhouette.nodes)}" fill="none" stroke="#6d334b" stroke-width="4"/></g>`).join('');const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800">${groups}</svg>`,a=document.createElement('a');a.href=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'}));a.download='wonder-pads-joined-pattern.svg';a.click();};
+  const exportJoined=()=>{const groups=pieces.map((piece,i)=>{const safeId=(piece.part.name||('part-'+(i+1))).replace(/[^a-z0-9_-]+/gi,'-').toLowerCase();return `<g id="${safeId}" transform="${transform(piece)}"><path d="${patternPathFor(piece.part.nodes)}" fill="none" stroke="#6d334b" stroke-width="4"/></g>`;}).join('');const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800"><title>Joined Wonder Pads pattern</title>${groups}</svg>`;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'}));a.download='wonder-pads-joined-pattern.svg';a.click();};
   const piece=pieces[active];
   return <div className="pattern-joiner-overlay"><div className="pattern-joiner-card">
-    <div className="row between pattern-joiner-head"><div><div className="eyebrow">Pattern workspace</div><h2 className="serif">Join saved silhouettes</h2><p className="muted small">Drag each piece into place, then rotate, resize or flip the selected piece.</p></div><button className="icon-btn" onClick={onClose}><Icon name="x" className="ico-sm"/></button></div>
-    <div className="pattern-joiner-tools">
-      <span>Selected: {piece?.shot.itemName||`Piece ${active+1}`}</span>
-      <button onClick={()=>update({rotation:piece.rotation-1})}>↶ Rotate</button><button onClick={()=>update({rotation:piece.rotation+1})}>↷ Rotate</button>
-      <button onClick={()=>update({scale:Math.max(.1,piece.scale-.02)})}>− Size</button><button onClick={()=>update({scale:Math.min(1.5,piece.scale+.02)})}>＋ Size</button>
-      <button onClick={()=>update({flipX:piece.flipX*-1})}>↔ Flip</button><button onClick={()=>update({flipY:piece.flipY*-1})}>↕ Flip</button>
-    </div>
-    <svg ref={svgRef} className="pattern-joiner-canvas" viewBox="0 0 1000 800" onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
-      <defs><pattern id="join-grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M25 0H0V25" fill="none" stroke="#8d687e" strokeOpacity=".10"/></pattern></defs><rect width="1000" height="800" fill="url(#join-grid)"/>
-      {pieces.map((p,i)=><g key={p.shot.key} transform={transform(p)} onPointerDown={e=>down(e,i)} style={{cursor:'grab'}}><path d={galleryPathFor(p.shot.silhouette.nodes)} fill={i===active?'#f2c9dd':'#f8e6ef'} fillOpacity=".62" stroke={i===active?'#703454':'#b883a3'} strokeWidth="5" vectorEffect="non-scaling-stroke"/></g>)}
-    </svg>
-    <div className="row between pattern-joiner-foot"><span className="muted small">The pieces stay as separate editable paths inside one SVG.</span><div className="row"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-blush" onClick={exportJoined}><Icon name="download" className="ico-sm"/> Export joined SVG</button></div></div>
+    <div className="row between pattern-joiner-head"><div><div className="eyebrow">Pattern workspace</div><h2 className="serif">Join PDF pattern parts</h2><p className="muted small">Drag each part into place, then rotate, resize, or flip the selected piece.</p></div><button className="icon-btn" onClick={onClose}><Icon name="x" className="ico-sm"/></button></div>
+    <div className="pattern-joiner-tools"><span>Selected: {piece?.part?.name||'Part'}</span><button onClick={()=>update({rotation:(piece?.rotation||0)-1})}>↶ Rotate</button><button onClick={()=>update({rotation:(piece?.rotation||0)+1})}>↷ Rotate</button><button onClick={()=>update({scale:Math.max(.1,(piece?.scale||.42)-.02)})}>− Size</button><button onClick={()=>update({scale:Math.min(1.5,(piece?.scale||.42)+.02)})}>＋ Size</button><button onClick={()=>update({flipX:(piece?.flipX||1)*-1})}>↔ Flip</button><button onClick={()=>update({flipY:(piece?.flipY||1)*-1})}>↕ Flip</button></div>
+    <svg ref={svgRef} className="pattern-joiner-canvas" viewBox="0 0 1000 800" onPointerMove={move} onPointerUp={up} onPointerCancel={up}><defs><pattern id="join-grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M25 0H0V25" fill="none" stroke="#8d687e" strokeOpacity=".10"/></pattern></defs><rect width="1000" height="800" fill="url(#join-grid)"/>{pieces.map((p,i)=><g key={p.part.id||i} transform={transform(p)} onPointerDown={e=>down(e,i)} style={{cursor:'grab'}}><path d={patternPathFor(p.part.nodes)} fill={i===active?'#f2c9dd':'#f8e6ef'} fillOpacity=".62" stroke={i===active?'#703454':'#b883a3'} strokeWidth="5" vectorEffect="non-scaling-stroke"/></g>)}</svg>
+    <div className="row between pattern-joiner-foot"><span className="muted small">Parts remain separate editable paths inside one SVG.</span><div className="row"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-blush" onClick={exportJoined} disabled={!pieces.length}><Icon name="download" className="ico-sm"/> Export joined SVG</button></div></div>
   </div></div>;
 };
 
 const SavedGallery = ({onGoto}) => {
   const [shots, setShots] = React.useState(() => readSavedShots());
-  const [selected,setSelected]=React.useState([]),[joining,setJoining]=React.useState(false);
+  const [patternParts, setPatternParts] = React.useState(() => { try { const v=JSON.parse(localStorage.getItem('wp-silhouette-parts-v1')||'[]'); return Array.isArray(v)?v:[]; } catch (_) { return []; } });
+  const [joiningPatterns, setJoiningPatterns] = React.useState(false);
 
   React.useEffect(() => {
     const sync = () => setShots(readSavedShots());
     window.addEventListener('wp-saved-gallery-updated', sync);
     window.addEventListener('storage', sync);
+    const syncParts = () => { try { const v=JSON.parse(localStorage.getItem('wp-silhouette-parts-v1')||'[]'); setPatternParts(Array.isArray(v)?v:[]); } catch (_) {} };
+    window.addEventListener('wp-silhouette-parts-updated', syncParts);
     return () => {
       window.removeEventListener('wp-saved-gallery-updated', sync);
       window.removeEventListener('storage', sync);
+      window.removeEventListener('wp-silhouette-parts-updated', syncParts);
     };
   }, []);
 
@@ -159,15 +145,6 @@ const SavedGallery = ({onGoto}) => {
       try { window.open(shot.src, '_blank', 'noopener,noreferrer'); } catch (error) {}
     }
   };
-  const downloadToDesktop = async (shot) => {
-    if (!shot?.src) return;
-    try {
-      const response=await fetch(shot.src),blob=await response.blob(),objectUrl=URL.createObjectURL(blob),anchor=document.createElement('a');
-      anchor.href=objectUrl;anchor.download=shot.fileName||'wonder-pads-studio-file.png';document.body.appendChild(anchor);anchor.click();anchor.remove();window.setTimeout(()=>URL.revokeObjectURL(objectUrl),1500);
-    } catch (_) {
-      const anchor=document.createElement('a');anchor.href=shot.src;anchor.download=shot.fileName||'wonder-pads-studio-file';anchor.click();
-    }
-  };
 
   const removeShot = (key) => {
     const next = shots.filter(shot => shot.key !== key);
@@ -181,10 +158,8 @@ const SavedGallery = ({onGoto}) => {
     writeSavedShots([]);
     window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
   };
-  const togglePattern=(key)=>setSelected(cur=>cur.includes(key)?cur.filter(id=>id!==key):[...cur,key]);
-  const selectedPatterns=shots.filter(shot=>selected.includes(shot.key)&&shot.type==='silhouette'&&shot.silhouette?.nodes?.length);
 
-  return <div className="saved-gallery-page">
+  return <><div className="saved-gallery-page">
     <div className="page-heading saved-gallery-page-heading">
       <div>
         <div className="eyebrow"><Icon name="photo" className="ico-sm"/> Library · Saved Gallery</div>
@@ -192,8 +167,8 @@ const SavedGallery = ({onGoto}) => {
         <p className="muted">Finalized product photos saved from Refine, ready to download or revisit from one calm library.</p>
       </div>
       <div className="row saved-gallery-page-actions">
+        {patternParts.length >= 2 && <button type="button" className="btn btn-blush" onClick={() => setJoiningPatterns(true)}><Icon name="layers" className="ico-sm"/> Join {patternParts.length} pattern parts</button>}
         <button type="button" className="btn btn-ghost" onClick={() => onGoto('generator')}><Icon name="sparkles" className="ico-sm"/> Open Production Generator</button>
-        {selectedPatterns.length>=2&&<button type="button" className="btn btn-blush" onClick={()=>setJoining(true)}><Icon name="layers" className="ico-sm"/> Join {selectedPatterns.length} patterns</button>}
         {shots.length > 0 && <button type="button" className="btn btn-ghost" onClick={clearAll}><Icon name="trash" className="ico-sm"/> Clear gallery</button>}
       </div>
     </div>
@@ -213,21 +188,19 @@ const SavedGallery = ({onGoto}) => {
         <button type="button" className="btn btn-blush" onClick={() => onGoto('generator')}><Icon name="sparkles" className="ico-sm"/> Go to Production Generator</button>
       </div> : <div className="saved-gallery-grid">
         {shots.map(shot => <div className="saved-shot-card" key={shot.key}>
-          <div className="saved-shot-preview"><img src={shot.src} alt={`${shot.itemName || 'Saved shot'} · ${shot.backdropName || 'Studio shot'}`} /><span className="saved-shot-badge"><Icon name="check" className="ico-sm"/> Saved</span>{shot.type==='silhouette'&&<label className="saved-pattern-select"><input type="checkbox" checked={selected.includes(shot.key)} onChange={()=>togglePattern(shot.key)}/><span>{selected.includes(shot.key)?'Selected':'Select to join'}</span></label>}</div>
+          <div className="saved-shot-preview"><img src={shot.src} alt={`${shot.itemName || 'Saved shot'} · ${shot.backdropName || 'Studio shot'}`} /><span className="saved-shot-badge"><Icon name="check" className="ico-sm"/> Saved</span></div>
           <div className="saved-shot-meta">
             <div className="saved-shot-name">{shot.itemName || 'Saved product photo'}</div>
             <div className="saved-shot-details">{shot.backdropName || 'Studio shot'} · {shot.ratio || '1:1'} · {shot.savedAt || 'Saved'}</div>
             <div className="saved-shot-actions">
-              <button type="button" className="btn btn-blush" onClick={() => downloadToDesktop(shot)}><Icon name="download" className="ico-sm"/> Download</button>
-              <button type="button" className="btn btn-ghost" onClick={() => downloadShot(shot)}><Icon name="photo" className="ico-sm"/> Phone</button>
+              <button type="button" className="btn btn-blush" onClick={() => downloadShot(shot)}><Icon name="download" className="ico-sm"/> Save to phone</button>
               <button type="button" className="btn btn-ghost" onClick={() => removeShot(shot.key)}><Icon name="trash" className="ico-sm"/> Remove</button>
             </div>
           </div>
         </div>)}
       </div>}
     </section>
-    {joining&&<PatternJoiner shots={selectedPatterns} onClose={()=>setJoining(false)}/>} 
-  </div>;
+  </div>{joiningPatterns && <PatternJoiner parts={patternParts} onClose={() => setJoiningPatterns(false)} />}</>;
 };
 
 const App = () => {
