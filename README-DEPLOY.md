@@ -28,3 +28,4 @@ Use one finger to select and drag vector nodes or Bézier handles, and two finge
 
 Press Escape or the Close button to leave the focused canvas modal.
 
+
