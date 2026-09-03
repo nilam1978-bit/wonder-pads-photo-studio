@@ -895,7 +895,7 @@
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js?v=76-persistent-pattern-workflow', { updateViaCache: 'none' })
+            navigator.serviceWorker.register('sw.js?v=77-codex-zoom-precision', { updateViaCache: 'none' })
 .then(reg => {
         // If a new SW is waiting, activate it immediately
         if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
@@ -920,23 +920,23 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
-<script src="assets/pdf.min.js?v=76-persistent-pattern-workflow"></script>
+<script src="assets/pdf.min.js?v=77-codex-zoom-precision"></script>
 <script>window.pdfjsLib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];</script>
 
-<script src="bg-removal.js?v=76-persistent-pattern-workflow"></script>
-<script src="proxy-config.js?v=76-persistent-pattern-workflow"></script>
-<script src="gemini.js?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="icons.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="data.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="backdrops.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="cutout-editor.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="preset-builder.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="silhouette-studio.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="production.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="fabric-prep.jsx?v=76-persistent-pattern-workflow"></script>
-<script type="text/babel" src="app.jsx?v=76-persistent-pattern-workflow"></script>
+<script src="bg-removal.js?v=77-codex-zoom-precision"></script>
+<script src="proxy-config.js?v=77-codex-zoom-precision"></script>
+<script src="gemini.js?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="icons.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="data.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="backdrops.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="cutout-editor.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="preset-builder.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="silhouette-studio.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="production.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="fabric-prep.jsx?v=77-codex-zoom-precision"></script>
+<script type="text/babel" src="app.jsx?v=77-codex-zoom-precision"></script>
 <style>
-.pattern-joiner-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(55,35,48,.62);overflow:auto}.pattern-joiner-card{width:min(1100px,100%);max-height:calc(100vh - 36px);display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid #ecd8e6;border-radius:22px;background:#fffafd;box-shadow:0 24px 80px rgba(63,35,54,.24)}.pattern-joiner-head{padding-bottom:8px;border-bottom:1px solid #f0e1eb}.pattern-joiner-head h2{margin:4px 0;font-size:26px;color:#61344e}.pattern-joiner-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px;border:1px solid #eed9e6;border-radius:12px;background:#fff7fb;color:#70415b;font-size:11px}.pattern-joiner-tools>span{margin-right:auto;font-weight:800}.pattern-joiner-tools button{border:1px solid #e5ccdc;border-radius:8px;background:#fff;color:#703454;padding:7px 9px;font-size:10px;font-weight:800}.pattern-joiner-tools button:active{transform:scale(.97)}.pattern-joiner-canvas{display:block;width:100%;height:min(62vh,620px);min-height:340px;border:1px solid #ecd8e6;border-radius:15px;background:#fff7fb;touch-action:none}.pattern-joiner-foot{padding-top:8px;border-top:1px solid #f0e1eb}.pattern-joiner-foot .muted{max-width:440px}.pattern-joiner-overlay button{font-family:inherit}@media(max-width:720px){.pattern-joiner-overlay{align-items:flex-start;padding:8px}.pattern-joiner-card{max-height:calc(100vh - 16px);padding:12px;border-radius:17px}.pattern-joiner-head{display:block}.pattern-joiner-head h2{font-size:22px}.pattern-joiner-tools{overflow-x:auto;flex-wrap:nowrap;padding:7px}.pattern-joiner-tools>span{min-width:120px}.pattern-joiner-tools button{flex:0 0 auto;min-height:36px}.pattern-joiner-canvas{height:54vh;min-height:300px}.pattern-joiner-foot{display:block}.pattern-joiner-foot .row{justify-content:flex-start;margin-top:9px;flex-wrap:wrap}}
+.silhouette-magnifier{position:absolute;z-index:8;width:180px;height:180px;padding:8px;border:2px solid #c95f9c;border-radius:16px;background:rgba(255,250,253,.96);box-shadow:0 14px 32px rgba(91,43,73,.18);pointer-events:none}.silhouette-magnifier-label{font-size:9px;font-weight:800;color:#6d334b;margin:0 2px 4px}.silhouette-magnifier svg{display:block;width:100%;height:calc(100% - 20px);overflow:visible}.pattern-joiner-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(55,35,48,.62);overflow:auto}.pattern-joiner-card{width:min(1100px,100%);max-height:calc(100vh - 36px);display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid #ecd8e6;border-radius:22px;background:#fffafd;box-shadow:0 24px 80px rgba(63,35,54,.24)}.pattern-joiner-head{padding-bottom:8px;border-bottom:1px solid #f0e1eb}.pattern-joiner-head h2{margin:4px 0;font-size:26px;color:#61344e}.pattern-joiner-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px;border:1px solid #eed9e6;border-radius:12px;background:#fff7fb;color:#70415b;font-size:11px}.pattern-joiner-tools>span{margin-right:auto;font-weight:800}.pattern-joiner-tools button{border:1px solid #e5ccdc;border-radius:8px;background:#fff;color:#703454;padding:7px 9px;font-size:10px;font-weight:800}.pattern-joiner-tools button:active{transform:scale(.97)}.pattern-joiner-canvas{display:block;width:100%;height:min(62vh,620px);min-height:340px;border:1px solid #ecd8e6;border-radius:15px;background:#fff7fb;touch-action:none}.pattern-joiner-foot{padding-top:8px;border-top:1px solid #f0e1eb}.pattern-joiner-foot .muted{max-width:440px}.pattern-joiner-overlay button{font-family:inherit}@media(max-width:720px){.pattern-joiner-overlay{align-items:flex-start;padding:8px}.pattern-joiner-card{max-height:calc(100vh - 16px);padding:12px;border-radius:17px}.pattern-joiner-head{display:block}.pattern-joiner-head h2{font-size:22px}.pattern-joiner-tools{overflow-x:auto;flex-wrap:nowrap;padding:7px}.pattern-joiner-tools>span{min-width:120px}.pattern-joiner-tools button{flex:0 0 auto;min-height:36px}.pattern-joiner-canvas{height:54vh;min-height:300px}.pattern-joiner-foot{display:block}.pattern-joiner-foot .row{justify-content:flex-start;margin-top:9px;flex-wrap:wrap}}
 </style>
 </body>
 </html>
