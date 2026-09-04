@@ -14,7 +14,6 @@
   const defaultHandles=(p,prev,next)=>{const dx=next.x-prev.x,dy=next.y-prev.y,l=Math.hypot(dx,dy)||1,h=Math.min(52,l*.2);return{handleIn:{x:p.x-dx/l*h,y:p.y-dy/l*h},handleOut:{x:p.x+dx/l*h,y:p.y+dy/l*h}};};
   const makeNode=(p,kind='sharp')=>({...p,kind,handleIn:{...p},handleOut:{...p}});
   const vectorize=(pts)=>pts.map((p,i)=>{const prev=pts[(i-1+pts.length)%pts.length],next=pts[(i+1)%pts.length];return{...makeNode(p,'smooth'),...defaultHandles(p,prev,next)};});
-  const fallbackNodes=(b)=>{const x=b?.minX??220,y=b?.minY??190,w=b?.width??280,h=b?.height??760;return vectorize([{x:x+w*.5,y},{x:x+w*.78,y:y+h*.08},{x:x+w*.92,y:y+h*.22},{x:x+w*.82,y:y+h*.34},{x:x+w*.68,y:y+h*.39},{x:x+w*.67,y:y+h*.58},{x:x+w*.85,y:y+h*.78},{x:x+w*.75,y:y+h*.95},{x:x+w*.5,y:y+h},{x:x+w*.25,y:y+h*.95},{x:x+w*.15,y:y+h*.78},{x:x+w*.33,y:y+h*.58},{x:x+w*.32,y:y+h*.39},{x:x+w*.18,y:y+h*.34},{x:x+w*.08,y:y+h*.22},{x:x+w*.22,y:y+h*.08}]);};
   const pathFor=(nodes)=>{if(nodes.length<3)return'';let d=`M ${nodes[0].x.toFixed(1)} ${nodes[0].y.toFixed(1)}`;for(let i=0;i<nodes.length;i++){const a=nodes[i],b=nodes[(i+1)%nodes.length];if(a.kind==='sharp'&&b.kind==='sharp')d+=` L ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;else{const c1=a.kind==='smooth'?a.handleOut:a,c2=b.kind==='smooth'?b.handleIn:b;d+=` C ${c1.x.toFixed(1)} ${c1.y.toFixed(1)}, ${c2.x.toFixed(1)} ${c2.y.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;}}return d+' Z';};
   const nearest=(p,items)=>items.reduce((best,x,i)=>{const d=dist(p,x);return d<best.distance?{index:i,distance:d}:best},{index:null,distance:Infinity});
   const nearestSegment=(p,nodes)=>{let best=null;nodes.forEach((a,i)=>{const b=nodes[(i+1)%nodes.length],dx=b.x-a.x,dy=b.y-a.y,l=dx*dx+dy*dy||1,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/l,0,1),q={x:a.x+t*dx,y:a.y+t*dy},d=dist(p,q);if(!best||d<best.distance)best={index:i,point:q,distance:d};});return best;};
@@ -70,7 +69,7 @@
 
     const [source,setSource]=useState(initialSource||savedSession?.source||'');
     const [sourceName,setSourceName]=useState(item?.name||savedSession?.sourceName||'pad-photo');
-    const [nodes,setNodes]=useState(()=>fallbackNodes());
+    const [nodes,setNodes]=useState(()=>[]);
     const [selected,setSelected]=useState(null);
     const [tool,setTool]=useState('calibrate');
     const [calibration,setCalibration]=useState([]);
@@ -225,10 +224,10 @@
           return [...cur,{id:`assembly-pdf-${Date.now()}`,name:`${sourceName} · page ${pageNumber}`,data,visible:true,x:360,y:STAGE.height*0.42,scale:1,rotation:0,opacity:58,naturalWidth:width,naturalHeight:height,crop:{x:0,y:0,w:width,h:height},pdfName:sourceName,pdfPage:pageNumber,pdfPages:doc.numPages}];
         });
         setCalibration([]);
-        setNodes(fallbackNodes());
+        setNodes([]);
         setSelected(null);
         setTool('trace');
-        setNotice(`PDF page ${pageNumber} of ${doc.numPages} is active on the assembly canvas.`);
+        setNotice(`PDF page ${pageNumber} of ${doc.numPages} is on the assembly canvas. Align it, then create the silhouette.`);
       }catch{
         setNotice('This PDF page could not be rendered. Try another page or a simpler PDF.');
       }finally{
@@ -356,13 +355,13 @@
         setPdfUrl('');setPdfDataUrl('');setPdfPageImage('');setPdfPageCount(0);setPdfThumbs([]);
         setAssemblySources([layer]);
         setAssemblySelected(0);setAssemblyMode(true);setCalibration([]);setExtracting(false);
-        return fallbackNodes();
+        return [];
       })).then(n=>{
         commit(()=>n);setSelected(null);setTool('trace');
-        setNotice('Automatic outline ready. Drag any point only if it needs cleanup.');
+        setNotice('Photo added to the assembly canvas. Align it, then create the silhouette.');
       }).catch(()=>{
-        setNodes(fallbackNodes());
-        setNotice('Photo loaded. The draft outline is ready for cleanup.');
+        commit(()=>[]);
+        setNotice('The photo could not be fully processed. Try a different file, or add it again.');
       }).finally(()=>setExtracting(false));
     };
 
@@ -450,7 +449,7 @@
     const selectAdjacent=(d)=>{if(!nodes.length)return;setSelected(i=>((i??(d>0?-1:0))+d+nodes.length)%nodes.length);setTool('trace');};
     const undo=()=>{const previous=history.current.pop();if(previous){redoStack.current.push(nodes);setNodes(previous);setNotice('Last edit undone.');}};
     const redo=()=>{const next=redoStack.current.pop();if(next){history.current.push(nodes);setNodes(next);setNotice('Edit restored.');}};
-    const reset=()=>{setZoom(1);setPan({x:0,y:0});setCalibration([]);setNodes(fallbackNodes());setSelected(null);setTool('trace');setNotice('View and outline reset.');};
+    const reset=()=>{setZoom(1);setPan({x:0,y:0});setCalibration([]);setNodes([]);setSelected(null);setTool('trace');setNotice('View and outline reset.');};
     const toggleMoveCanvas=()=>setTool(t=>t==='pan'?'trace':'pan');
     const togglePopover=(name)=>setOpenPopover(cur=>cur===name?null:name);
 
