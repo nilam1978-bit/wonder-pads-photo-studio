@@ -34,6 +34,7 @@ const Icon = ({ name, className = 'ico', style }) => {
     star: <g {...P}><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/></g>,
     chevronDown: <g {...P}><path d="M6 9l6 6 6-6"/></g>,
     chevronRight: <g {...P}><path d="M9 6l6 6-6 6"/></g>,
+    chevronLeft: <g {...P}><path d="M15 6l-6 6 6 6"/></g>,
     x: <g {...P}><path d="M18 6L6 18M6 6l12 12"/></g>,
     scissors: <g {...P}><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></g>,
     aperture: <g {...P}><circle cx="12" cy="12" r="10"/><path d="M14.3 9.7L20.7 3.3M8.5 8.5L4.5 3.5M9.7 14.3L3.3 20.7M14.3 14.3l6.4 6.4M8.5 15.5L4.5 20.5"/></g>,
