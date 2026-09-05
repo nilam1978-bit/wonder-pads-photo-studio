@@ -44,6 +44,19 @@
   const lineDistance=(p,a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1);return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);};
   function simplify(pts,tolerance){if(pts.length<=2)return pts;const keep=new Uint8Array(pts.length),stack=[[0,pts.length-1]];keep[0]=keep[pts.length-1]=1;while(stack.length){const[a,b]=stack.pop();let d=tolerance,index=-1;for(let i=a+1;i<b;i++){const v=lineDistance(pts[i],pts[a],pts[b]);if(v>d){d=v;index=i;}}if(index!==-1){keep[index]=1;stack.push([a,index],[index,b]);}}return pts.filter((_,i)=>keep[i]);}
   function ring(pts,tolerance){const mid=Math.floor(pts.length/2);return [...simplify(pts.slice(0,mid+1),tolerance).slice(0,-1),...simplify([...pts.slice(mid),pts[0]],tolerance).slice(0,-1)];}
+  // Simplify sampled curves, retaining abrupt corners and limiting handle overshoot.
+  function refine(ns,amount=1){
+    if(ns.length<4)return ns;
+    const box=curveBounds(ns),tolerance=Math.max(box.w,box.h)*.002*amount,pts=[];
+    ns.forEach((a,i)=>{const b=ns[(i+1)%ns.length],length=Math.hypot(a.out.x-a.x,a.out.y-a.y)+Math.hypot(b.in.x-a.out.x,b.in.y-a.out.y)+Math.hypot(b.x-b.in.x,b.y-b.in.y),steps=clamp(Math.ceil(length/Math.max(tolerance/2,.1)),2,256);for(let j=0;j<steps;j++)pts.push(cubic(a,b,j/steps));});
+    const reduced=ring(pts,tolerance);if(reduced.length<3)return ns;
+    const out=nodes(reduced);
+    out.forEach((n,i)=>{const a=out[(i-1+out.length)%out.length],b=out[(i+1)%out.length],ux=n.x-a.x,uy=n.y-a.y,vx=b.x-n.x,vy=b.y-n.y,al=Math.hypot(ux,uy),bl=Math.hypot(vx,vy);if((ux*vx+uy*vy)/(al*bl||1)<.65)return;const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,h=Math.min(al,bl)*.28;n.in={x:n.x-dx/len*h,y:n.y-dy/len*h};n.out={x:n.x+dx/len*h,y:n.y+dy/len*h};});
+    const distance=p=>{let best=Infinity;for(let i=0;i<pts.length;i++)best=Math.min(best,lineDistance(p,pts[i],pts[(i+1)%pts.length]));return best;};
+    out.forEach((a,i)=>{const b=out[(i+1)%out.length];for(let pass=0;pass<5;pass++){let error=0;for(let j=1;j<16;j++)error=Math.max(error,distance(cubic(a,b,j/16)));if(error<=tolerance*1.5)break;a.out={x:(a.out.x+a.x)/2,y:(a.out.y+a.y)/2};b.in={x:(b.in.x+b.x)/2,y:(b.in.y+b.y)/2};}});
+    return out.length<ns.length?out:ns;
+  }
+  const pageScale=a=>a.pdfScale?1/a.pdfScale:Math.min(1,700/Math.max(a.w,a.h));
   async function trace(doc,threshold,gap){
     const layers=doc.layers.filter(l=>l.visible),b=layerBounds(layers);if(!b)throw new Error('Place at least one page on the canvas.');
     const scale=Math.min(2,1600/Math.max(b.w,b.h)),margin=Math.max(24,Math.ceil(gap*scale)+8),w=Math.ceil(b.w*scale)+margin*2,h=Math.ceil(b.h*scale)+margin*2;
@@ -59,8 +72,8 @@
     const groups=components(mask,w,h);if(!groups.length||groups[0].length<100)throw new Error('No clear outline found. Crop closely around your pattern or increase ink sensitivity.');
     const large=groups.filter(g=>g.length>Math.max(100,groups[0].length*.025));if(large.length>1)throw new Error(`There are ${large.length} separate shapes. Overlap the joining edges, crop away other patterns, or increase Close small gaps. Your assembly is unchanged.`);
     mask=new Uint8Array(w*h);groups[0].forEach(i=>mask[i]=1);const raw=boundary(mask,w,h);if(raw.length<4)throw new Error('The boundary could not be followed. Check that the outside edge is closed.');const bb=bounds(raw);if(groups[0].length/(bb.w*bb.h)<.13)throw new Error('The outline appears open. Align the cut edges or increase Close small gaps to make a closed shape.');
-    return nodes(ring(raw,1.3).map(p=>({x:(p.x-margin)/scale+b.x,y:(p.y-margin)/scale+b.y})));
+    return refine(nodes(ring(raw,1.3).map(p=>({x:(p.x-margin)/scale+b.x,y:(p.y-margin)/scale+b.y}))),1);
   }
-  const api={clamp,uid,empty,image,turn,world,local,corners,bounds,layerBounds,nodes,path,move,cubic,curveBounds,svg,download,save,load,legacy,morphology,fill,components,boundary,ring,trace};
+  const api={clamp,uid,empty,image,turn,world,local,corners,bounds,layerBounds,nodes,path,move,cubic,curveBounds,svg,download,save,load,legacy,morphology,fill,components,boundary,ring,refine,pageScale,trace};
   if(typeof module!=='undefined')module.exports=api;root.WPSilhouette=api;
 })(typeof window!=='undefined'?window:globalThis);
