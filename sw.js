@@ -1,7 +1,7 @@
 // Wonder Pads Studio — Service Worker
 // v73 focused canvas editor. Network-first for app assets keeps previews and
 // deployments current, while cached files provide an offline fallback.
-const VERSION = 'wp-studio-v78-assembly-first-magnifier';
+const VERSION = 'wp-studio-v83-compact-bezier-magnifier';
 const APP_SHELL_CACHE = `app-shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 const APP_SHELL = [
@@ -9,7 +9,7 @@ const APP_SHELL = [
   './icons.jsx', './data.jsx', './backdrops.jsx', './preset-builder.jsx',
   './production.jsx', './fabric-prep.jsx', './app.jsx', './bg-removal.js',
   './gemini.js', './proxy-config.js', './bg-worker.js', './cutout-editor.jsx',
-  './silhouette-studio.jsx', './assets/pdf.min.js', './assets/pdf.worker.min.js',
+  './silhouette-studio.jsx', './silhouette-engine.js', './silhouette-studio.css', './assets/pdf.min.js', './assets/pdf.worker.min.js',
   './assets/icon-192.png', './assets/icon-512.png', './assets/brand-reference.png',
   './assets/preset-sewing.jpg', './assets/preset-blush.jpg', './assets/preset-cozy.jpg',
   './assets/preset-linen.jpg', './assets/preset-studio.jpg', './assets/product-upload.jpg'
