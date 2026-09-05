@@ -54,10 +54,11 @@
     out.forEach((n,i)=>{const a=out[(i-1+out.length)%out.length],b=out[(i+1)%out.length],ux=n.x-a.x,uy=n.y-a.y,vx=b.x-n.x,vy=b.y-n.y,al=Math.hypot(ux,uy),bl=Math.hypot(vx,vy);if((ux*vx+uy*vy)/(al*bl||1)<.65)return;const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,h=Math.min(al,bl)*.28;n.in={x:n.x-dx/len*h,y:n.y-dy/len*h};n.out={x:n.x+dx/len*h,y:n.y+dy/len*h};});
     const distance=p=>{let best=Infinity;for(let i=0;i<pts.length;i++)best=Math.min(best,lineDistance(p,pts[i],pts[(i+1)%pts.length]));return best;};
     out.forEach((a,i)=>{const b=out[(i+1)%out.length];for(let pass=0;pass<5;pass++){let error=0;for(let j=1;j<16;j++)error=Math.max(error,distance(cubic(a,b,j/16)));if(error<=tolerance*1.5)break;a.out={x:(a.out.x+a.x)/2,y:(a.out.y+a.y)/2};b.in={x:(b.in.x+b.x)/2,y:(b.in.y+b.y)/2};}});
+    out.forEach(n=>['in','out'].forEach(k=>{n[k].x=clamp(n[k].x,box.x,box.x+box.w);n[k].y=clamp(n[k].y,box.y,box.y+box.h);}));
     return out.length<ns.length?out:ns;
   }
   const pageScale=a=>a.pdfScale?1/a.pdfScale:Math.min(1,700/Math.max(a.w,a.h));
-  async function trace(doc,threshold,gap){
+  async function trace(doc,threshold,gap,choose=false){
     const layers=doc.layers.filter(l=>l.visible),b=layerBounds(layers);if(!b)throw new Error('Place at least one page on the canvas.');
     const scale=Math.min(2,1600/Math.max(b.w,b.h)),margin=Math.max(24,Math.ceil(gap*scale)+8),w=Math.ceil(b.w*scale)+margin*2,h=Math.ceil(b.h*scale)+margin*2;
     const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);
@@ -70,9 +71,13 @@
     // Remove single-pixel ink tails without flattening the pad's inward curves.
     mask=fill(morphology(morphology(mask,w,h,1,false),w,h,1,true),w,h);
     const groups=components(mask,w,h);if(!groups.length||groups[0].length<100)throw new Error('No clear outline found. Crop closely around your pattern or increase ink sensitivity.');
-    const large=groups.filter(g=>g.length>Math.max(100,groups[0].length*.025));if(large.length>1)throw new Error(`There are ${large.length} separate shapes. Overlap the joining edges, crop away other patterns, or increase Close small gaps. Your assembly is unchanged.`);
-    mask=new Uint8Array(w*h);groups[0].forEach(i=>mask[i]=1);const raw=boundary(mask,w,h);if(raw.length<4)throw new Error('The boundary could not be followed. Check that the outside edge is closed.');const bb=bounds(raw);if(groups[0].length/(bb.w*bb.h)<.13)throw new Error('The outline appears open. Align the cut edges or increase Close small gaps to make a closed shape.');
+    const large=groups.filter(g=>g.length>Math.max(100,groups[0].length*.025));if(large.length>1&&!choose)throw new Error(`There are ${large.length} separate shapes. Overlap the joining edges, crop away other patterns, or increase Close small gaps. Your assembly is unchanged.`);
+    const outline=group=>{
+    mask=new Uint8Array(w*h);group.forEach(i=>mask[i]=1);const raw=boundary(mask,w,h);if(raw.length<4)throw new Error('The boundary could not be followed. Check that the outside edge is closed.');const bb=bounds(raw);if((!choose||large.length===1)&&group.length/(bb.w*bb.h)<.13)throw new Error('The outline appears open. Align the cut edges or increase Close small gaps to make a closed shape.');
     return refine(nodes(ring(raw,1.3).map(p=>({x:(p.x-margin)/scale+b.x,y:(p.y-margin)/scale+b.y}))),1);
+    };
+    if(choose&&large.length>1)return {choices:large.map(outline)};
+    return outline(groups[0]);
   }
   const api={clamp,uid,empty,image,turn,world,local,corners,bounds,layerBounds,nodes,path,move,cubic,curveBounds,svg,download,save,load,legacy,morphology,fill,components,boundary,ring,refine,pageScale,trace};
   if(typeof module!=='undefined')module.exports=api;root.WPSilhouette=api;
