@@ -6,8 +6,8 @@
   const images=new Map();
   const image=src=>{if(!images.has(src))images.set(src,new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>{images.delete(src);reject(new Error('This image could not be opened.'));};im.src=src;}));return images.get(src);};
   const turn=(p,deg)=>{const a=deg*Math.PI/180;return{x:p.x*Math.cos(a)-p.y*Math.sin(a),y:p.x*Math.sin(a)+p.y*Math.cos(a)};};
-  const world=(p,l)=>{const q=turn({x:p.x*l.scale*(l.flip?-1:1),y:p.y*l.scale},l.rotation);return{x:l.x+q.x,y:l.y+q.y};};
-  const local=(p,l)=>{const q=turn({x:p.x-l.x,y:p.y-l.y},-l.rotation);return{x:q.x/l.scale*(l.flip?-1:1),y:q.y/l.scale};};
+  const world=(p,l)=>{const q=turn({x:p.x*l.scale*(l.flip?-1:1),y:p.y*l.scale*(l.flipY?-1:1)},l.rotation);return{x:l.x+q.x,y:l.y+q.y};};
+  const local=(p,l)=>{const q=turn({x:p.x-l.x,y:p.y-l.y},-l.rotation);return{x:q.x/l.scale*(l.flip?-1:1),y:q.y/l.scale*(l.flipY?-1:1)};};
   const corners=r=>[{x:r.x,y:r.y},{x:r.x+r.w,y:r.y},{x:r.x+r.w,y:r.y+r.h},{x:r.x,y:r.y+r.h}];
   const bounds=pts=>{if(!pts.length)return null;let x=Infinity,y=Infinity,X=-Infinity,Y=-Infinity;pts.forEach(p=>{x=Math.min(x,p.x);y=Math.min(y,p.y);X=Math.max(X,p.x);Y=Math.max(Y,p.y);});return{x,y,w:Math.max(.001,X-x),h:Math.max(.001,Y-y)};};
   const layerBounds=ls=>bounds(ls.flatMap(l=>corners(l.crop).map(p=>world(p,l))));
@@ -21,7 +21,7 @@
   const openStore=()=>new Promise((resolve,reject)=>{const r=indexedDB.open('wp-silhouette-workspace',1);r.onupgradeneeded=()=>r.result.createObjectStore('projects');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
   const save=async doc=>{const db=await openStore();try{await new Promise((resolve,reject)=>{const tx=db.transaction('projects','readwrite');tx.objectStore('projects').put(doc,'current');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}finally{db.close();}};
   const load=async()=>{const db=await openStore();try{return await new Promise((resolve,reject)=>{const r=db.transaction('projects').objectStore('projects').get('current');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}finally{db.close();}};
-  const legacy=()=>{try{const old=JSON.parse(localStorage.getItem('wp-silhouette-session-v2')||'null');if(!old)return null;const assets=[],layers=[];(old.assemblySources||[]).forEach(l=>{const id=uid(),w=l.naturalWidth||l.crop?.w||960,h=l.naturalHeight||l.crop?.h||2880,crop=l.crop||{x:0,y:0,w,h},scale=l.scale||1,rotation=l.rotation||0;assets.push({id,name:l.name,src:l.data,w,h});const off=turn({x:(crop.x+crop.w/2)*scale,y:(crop.y+crop.h/2)*scale},rotation);layers.push({id:uid(),assetId:id,name:l.name,x:l.x-off.x,y:l.y-off.y,scale,rotation,flip:false,opacity:l.opacity??74,visible:l.visible!==false,locked:false,crop});});const ns=old.assemblyMode===false?(old.nodes||[]).map(n=>({x:n.x,y:n.y,in:n.handleIn||{x:n.x,y:n.y},out:n.handleOut||{x:n.x,y:n.y}})):[];return assets.length?{assets,layers,nodes:ns,stage:ns.length?'silhouette':'pieces',name:'pad-silhouette'}:null;}catch{return null;}};
+  const legacy=()=>{try{const old=JSON.parse(localStorage.getItem('wp-silhouette-session-v2')||'null');if(!old)return null;const assets=[],layers=[];(old.assemblySources||[]).forEach(l=>{const id=uid(),w=l.naturalWidth||l.crop?.w||960,h=l.naturalHeight||l.crop?.h||2880,crop=l.crop||{x:0,y:0,w,h},scale=l.scale||1,rotation=l.rotation||0;assets.push({id,name:l.name,src:l.data,w,h});const off=turn({x:(crop.x+crop.w/2)*scale,y:(crop.y+crop.h/2)*scale},rotation);layers.push({id:uid(),assetId:id,name:l.name,x:l.x-off.x,y:l.y-off.y,scale,rotation,flip:false,flipY:false,opacity:l.opacity??74,visible:l.visible!==false,locked:false,crop});});const ns=old.assemblyMode===false?(old.nodes||[]).map(n=>({x:n.x,y:n.y,in:n.handleIn||{x:n.x,y:n.y},out:n.handleOut||{x:n.x,y:n.y}})):[];return assets.length?{assets,layers,nodes:ns,stage:ns.length?'silhouette':'pieces',name:'pad-silhouette'}:null;}catch{return null;}};
   // Square morphology uses two sliding windows instead of a per-pixel kernel.
   function morphology(mask,w,h,r,dilate){
     if(!r)return mask;const temp=new Uint8Array(mask.length),out=new Uint8Array(mask.length),test=sum=>dilate?sum>0:sum===2*r+1;
@@ -65,7 +65,7 @@
     // Identical transforms to the workspace. White paper cannot erase the earlier
     // piece. Alignment opacity is ignored, so transparency cannot split a trace.
     ctx.globalCompositeOperation='multiply';
-    for(const l of layers){const a=doc.assets.find(a=>a.id===l.assetId),im=await image(a.src);ctx.save();ctx.translate(margin-b.x*scale,margin-b.y*scale);ctx.scale(scale,scale);ctx.translate(l.x,l.y);ctx.rotate(l.rotation*Math.PI/180);ctx.scale(l.scale*(l.flip?-1:1),l.scale);const r=l.crop;ctx.beginPath();ctx.rect(r.x,r.y,r.w,r.h);ctx.clip();ctx.drawImage(im,0,0,a.w,a.h);ctx.restore();}
+    for(const l of layers){const a=doc.assets.find(a=>a.id===l.assetId),im=await image(a.src);ctx.save();ctx.translate(margin-b.x*scale,margin-b.y*scale);ctx.scale(scale,scale);ctx.translate(l.x,l.y);ctx.rotate(l.rotation*Math.PI/180);ctx.scale(l.scale*(l.flip?-1:1),l.scale*(l.flipY?-1:1));const r=l.crop;ctx.beginPath();ctx.rect(r.x,r.y,r.w,r.h);ctx.clip();ctx.drawImage(im,0,0,a.w,a.h);ctx.restore();}
     const pixels=ctx.getImageData(0,0,w,h).data;let mask=new Uint8Array(w*h);for(let i=0;i<mask.length;i++){const j=i*4;mask[i]=255-(pixels[j]*.2126+pixels[j+1]*.7152+pixels[j+2]*.0722)>=threshold?1:0;}
     const radius=clamp(Math.round(gap*scale/2),0,30);mask=morphology(morphology(mask,w,h,radius,true),w,h,radius,false);mask=fill(mask,w,h);
     // Remove single-pixel ink tails without flattening the pad's inward curves.
