@@ -345,18 +345,19 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         const cutout = activeItem.cutout;
     // Preserve each existing result's own ratio on Re-run. A Canvas change is scoped
     // to the selected result and must not be overwritten by the shared item default.
-    const ratios = ids.map((id, i) => activeItem.results?.[i]?.ratio || activeItem.ratio);
-    const pending = ids.map((id, i) => resultDefaults({ status:'pending', backdropId: id, ratio: ratios[i] }));
+    const currentLooks = ids.map((id, i) => activeItem.results?.[i] || activeItem.previewDraft || resultDefaults());
+    const ratios = ids.map((id, i) => currentLooks[i]?.ratio || activeItem.ratio);
+    const pending = ids.map((id, i) => resultDefaults({ ...currentLooks[i], status:'pending', src:'', backdropId:id, ratio:ratios[i] }));
     patchItem(activeItem.id, { results: pending });
     const outs = await Promise.all(ids.map(async (id, i) => {
       const ratio = ratios[i];
       const bd = BACKDROPS.find(b => b.id === id);
       try {
-        const currentLook = activeItem.results?.[i] || resultDefaults();
+        const currentLook = currentLooks[i];
         const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(currentLook.padding) || 0.10, zoom:Number(currentLook.zoom) || 1, ...shadowOptionsFor(currentLook) });
-        return resultDefaults({ status:'ok', src, backdropId: id, ratio });
+        return resultDefaults({ ...currentLook, status:'ok', src, backdropId:id, ratio });
       } catch (e) {
-        return resultDefaults({ status:'error', error: e.message, backdropId: id, ratio });
+        return resultDefaults({ ...currentLooks[i], status:'error', error:e.message, backdropId:id, ratio });
       }
     }));
     patchItem(activeItem.id, { results: outs });
@@ -370,15 +371,17 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       if (!it || !it.cutout) continue;
       const ratio = it.ratio;
       const ids = it.chosenBackdropIds.slice(0, generationCount);
-      patchItem(id, { results: ids.map(bid => resultDefaults({ status:'pending', backdropId: bid, ratio })) });
-      const outs = await Promise.all(ids.map(async (bid) => {
+      const currentLooks = ids.map(bid => it.results?.find(result => result.backdropId === bid) || it.previewDraft || resultDefaults());
+      patchItem(id, { results: ids.map((bid, index) => resultDefaults({ ...currentLooks[index], status:'pending', src:'', backdropId:bid, ratio })) });
+      const outs = await Promise.all(ids.map(async (bid, index) => {
         const bd = BACKDROPS.find(b => b.id === bid);
         try {
-          const currentLook = it.results?.find(result => result.backdropId === bid) || resultDefaults();
+          const currentLook = currentLooks[index];
           const src = await window.WPBGRemoval.composite(it.cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(currentLook.padding) || 0.10, zoom:Number(currentLook.zoom) || 1, ...shadowOptionsFor(currentLook) });
-          return resultDefaults({ status:'ok', src, backdropId: bid, ratio });
+          return resultDefaults({ ...currentLook, status:'ok', src, backdropId:bid, ratio });
         } catch (e) {
-          return resultDefaults({ status:'error', error: e.message, backdropId: bid, ratio });
+          const currentLook = currentLooks[index];
+          return resultDefaults({ ...currentLook, status:'error', error:e.message, backdropId:bid, ratio });
         }
       }));
       patchItem(id, { results: outs });
@@ -530,6 +533,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   });
   const [savingSelectedResult, setSavingSelectedResult] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
+  const [batchSaveNotice, setBatchSaveNotice] = useState('');
   useEffect(() => {
     try { localStorage.setItem('wp_saved_shots', JSON.stringify(savedShots)); } catch (_) {}
     window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
@@ -704,6 +708,31 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const clearLogo = () => patchSelectedResult({ logoDataUrl:'', logoName:'', logoScale:0.18, logoOpacity:1, logoPosition:'top-right' });
 
+  const applyActiveLogoToAllReady = () => {
+    if (!selectedResult?.logoDataUrl) {
+      setSaveNotice('Choose or upload a logo first');
+      return;
+    }
+    const logo = {
+      logoDataUrl:selectedResult.logoDataUrl,
+      logoName:selectedResult.logoName || 'Saved logo',
+      logoPosition:selectedResult.logoPosition || 'top-right',
+      logoScale:Number(selectedResult.logoScale) || 0.18,
+      logoOpacity:selectedResult.logoOpacity == null ? 1 : Number(selectedResult.logoOpacity),
+    };
+    let count = 0;
+    setItems(previous => previous.map(item => {
+      if (!item.cutout) return item;
+      count += 1;
+      return {
+        ...item,
+        previewDraft:{ ...(item.previewDraft || resultDefaults()), ...logo },
+        results:(item.results || []).map(result => ({ ...result, ...logo })),
+      };
+    }));
+    setSaveNotice(`Logo applied to ${count} ready photo${count === 1 ? '' : 's'}`);
+  };
+
   const renderFinishedShot = async (result, format = 'png') => {
     if (!result?.src || result.status !== 'ok') return null;
     const image = await new Promise((resolve, reject) => {
@@ -785,12 +814,19 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     downloadOne(output, shotFilename(result, item, format));
   };
 
-  const saveFinishedShotToPhone = async () => {
-    if (!activeItem || !selectedResult || selectedResult.status !== 'ok') return;
-    const output = await renderFinishedShot(selectedResult, exportFormat);
+  const saveFinishedShotToPhone = async (result = selectedResult, item = activeItem) => {
+    if (!item || !result || result.status !== 'ok') return 'failed';
+    const output = await renderFinishedShot(result, exportFormat);
     if (!output) return;
-    const status = await saveDataUrlToPhone(output, shotFilename(selectedResult, activeItem, exportFormat));
+    const status = await saveDataUrlToPhone(output, shotFilename(result, item, exportFormat));
     setSaveNotice(status === 'shared' ? 'Share sheet opened' : status === 'downloaded' ? 'Saved to downloads' : status === 'opened' ? 'Image opened — long-press to save' : 'Could not save automatically');
+    return status;
+  };
+
+  const saveBatchResultToPhone = async (entry) => {
+    setBatchSaveNotice('Preparing picture…');
+    const status = await saveFinishedShotToPhone(entry.result, entry.item);
+    setBatchSaveNotice(status === 'shared' ? 'Choose Save Image in the share sheet' : status === 'downloaded' ? 'Saved to Downloads' : status === 'opened' ? 'Image opened — hold it and choose Save to Photos' : 'Could not save automatically');
   };
 
   const downloadAllForGallery = async () => {
@@ -1228,9 +1264,6 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                         <button className="btn btn-blush gallery-action-btn" disabled={!done} title={done ? 'Open studio refinement' : 'Available when BG Remove finishes'} onClick={()=>{ if (!done) return; setActiveId(it.id); setSelectedResultIdx(0); setShowStudioModal(true); }}>
                           <Icon name="sparkles" className="ico-sm"/> Refine
                         </button>
-                        <button className="btn btn-ghost gallery-action-btn" disabled={!done} title={done ? 'Create an editable vector silhouette' : 'Available when BG Remove finishes'} onClick={()=>{ if (!done) return; setActiveId(it.id); setShowSilhouette(false); onGoto && onGoto('silhouette', null, null, it); }}>
-                          <Icon name="template" className="ico-sm"/> Silhouette
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -1264,7 +1297,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
           <div className="row between saved-gallery-head">
             <div>
               <div className="serif" style={{fontSize:22}}>Batch results</div>
-              <div className="saved-gallery-note">Pictures created by Apply this to batch. Open one to adjust it individually, or download it now.</div>
+              <div className="saved-gallery-note">Pictures created by Apply this to batch. Open one to adjust it, or save it to your phone.</div>
+              {batchSaveNotice && <div className="batch-save-notice" role="status">{batchSaveNotice}</div>}
             </div>
             <span className="pill pill-blush"><Icon name="copy" className="ico-sm"/> {batchResults.length} applied</span>
           </div>
@@ -1272,13 +1306,13 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
             {batchResults.map(entry => {
               const backdrop = BACKDROPS.find(item => item.id === entry.result.backdropId);
               return <div className="saved-shot-card" key={`batch:${entry.item.id}:${entry.resultIndex}`}>
-                <div className="saved-shot-preview"><img src={entry.result.src} alt={`${entry.item.name} batch result`} loading="lazy" decoding="async"/><span className="saved-shot-badge"><Icon name="copy" className="ico-sm"/> Batch</span></div>
+                <div className="saved-shot-preview"><img src={entry.result.src} alt={`${entry.item.name} batch result`} loading="lazy" decoding="async"/>{entry.result.logoDataUrl && <img className="saved-shot-logo" src={entry.result.logoDataUrl} alt="" aria-hidden="true" style={{...logoPositionStyle(entry.result.logoPosition), '--logo-width':`${Math.round((Number(entry.result.logoScale) || 0.18) * 100)}%`, opacity:Number(entry.result.logoOpacity) || 1}}/>}<span className="saved-shot-badge"><Icon name="copy" className="ico-sm"/> Batch</span></div>
                 <div className="saved-shot-meta">
                   <div className="saved-shot-name" title={entry.item.name}>{entry.item.name}</div>
                   <div className="saved-shot-details">{backdrop?.name || 'Studio shot'} · {entry.result.ratio || entry.item.ratio}</div>
                   <div className="saved-shot-actions">
                     <button type="button" className="btn btn-ghost" onClick={()=>reopenBatchResult(entry)}><Icon name="edit" className="ico-sm"/> Open refine</button>
-                    <button type="button" className="btn btn-blush" onClick={()=>downloadFinishedShot(entry.result, entry.item, exportFormat)}><Icon name="download" className="ico-sm"/> Download</button>
+                    <button type="button" className="btn btn-blush" onClick={()=>saveBatchResultToPhone(entry)}><Icon name="download" className="ico-sm"/> Save to phone</button>
                   </div>
                 </div>
               </div>;
@@ -1405,7 +1439,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                 <button className={selectedSavedShot ? 'btn btn-ghost' : 'btn btn-primary'} disabled={!activeItem.cutout || !selectedResult || selectedResult.status !== 'ok' || savingSelectedResult} onClick={saveSelectedResult}>
                   <Icon name={savingSelectedResult ? 'refresh' : selectedSavedShot ? 'check' : 'save'} className="ico-sm"/> <span className="compact-action-label">{savingSelectedResult ? 'Saving…' : selectedSavedShot ? 'Update saved' : 'Save changes'}</span>
                 </button>
-                <button className="btn btn-ghost save-phone-btn" disabled={!activeItem.cutout || !selectedResult || selectedResult.status !== 'ok'} onClick={saveFinishedShotToPhone}>
+                <button className="btn btn-ghost save-phone-btn" disabled={!activeItem.cutout || !selectedResult || selectedResult.status !== 'ok'} onClick={()=>saveFinishedShotToPhone()}>
                   <Icon name="download" className="ico-sm"/> <span className="compact-action-label">Save to phone</span>
                 </button>
                 <label className="generation-count-control" title="Number of browser-composited studio outputs made for this photo"><span>Outputs</span><select value={generationCount} onChange={(e)=>setGenerationCount(Number(e.target.value))} aria-label="Number of studio outputs"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
@@ -1555,6 +1589,10 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                       {selectedResult?.logoDataUrl && <div className="logo-controls">
                         <div className="logo-file-row"><div className="logo-file-preview"><img src={selectedResult.logoDataUrl} alt="Uploaded logo preview"/></div><div style={{minWidth:0, flex:1}}><div style={{fontSize:11.5, fontWeight:700, color:'var(--ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{selectedResult.logoName || 'Uploaded logo'}</div><div style={{fontSize:10.5, color:'var(--muted)', marginTop:2}}>Transparent image · live preview</div></div><button type="button" className="btn btn-ghost" style={{padding:'5px 8px', fontSize:10.5}} onClick={clearLogo}>Remove</button></div>
                         <div className="logo-control-grid"><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}>Position</span><select className="select" value={selectedResult.logoPosition || 'top-right'} onChange={(e)=>patchSelectedResult({logoPosition:e.target.value})}><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}><span>Size</span><span className="hint">{Math.round((Number(selectedResult.logoScale) || 0.18) * 100)}%</span></span><input type="range" min="0.08" max="0.42" step="0.01" value={selectedResult.logoScale || 0.18} onChange={(e)=>patchSelectedResult({logoScale:Number(e.target.value)})}/></label><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}><span>Opacity</span><span className="hint">{Math.round((Number(selectedResult.logoOpacity) || 1) * 100)}%</span></span><input type="range" min="0.2" max="1" step="0.05" value={selectedResult.logoOpacity ?? 1} onChange={(e)=>patchSelectedResult({logoOpacity:Number(e.target.value)})}/></label></div>
+                        <div className="logo-apply-actions">
+                          <div className="logo-active-note"><Icon name="check" className="ico-sm"/> Logo is applied to this photo</div>
+                          <button type="button" className="btn btn-blush" onClick={applyActiveLogoToAllReady}><Icon name="copy" className="ico-sm"/> Apply logo to all ready photos</button>
+                        </div>
                       </div>}
                       </div>
                     </div>}
