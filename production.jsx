@@ -152,6 +152,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         patchItem(id, { bgError: e.message || String(e), bgProgress: null });
       } finally {
         if (currentJobItemId.current === id) currentJobItemId.current = null;
+        // Let the browser release the previous photo's temporary bitmap before
+        // the next queued background-removal job begins.
+        await new Promise(resolve => setTimeout(resolve, 180));
       }
     });
   };
@@ -163,12 +166,15 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
     // Read + measure each file first, then push them in as a batch
     const prepared = await Promise.all(files.map(async (f, i) => {
-      const src = await readFileAsDataURL(f);
+      // Blob URLs keep the original photo outside the JavaScript string heap.
+      // This is much lighter than a full base64 copy during a mobile batch.
+      const src = URL.createObjectURL(f);
       const dim = await dimensionsFromSrc(src);
       return {
         id: `it_${now}_${i}_${Math.random().toString(36).slice(2,7)}`,
         name: f.name,
         src,
+        sourceObjectUrl: true,
         w: dim.w, h: dim.h,
         manualSrc: null,
         previewDraft: resultDefaults({ status:'ok', src, backdropId:presetBackdropIds[0], ratio:presetRatio }),
@@ -224,6 +230,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   };
 
   const removeItem = (id) => {
+    const removed = itemsRef.current.find(item => item.id === id);
+    if (removed?.cutout?.startsWith?.('blob:')) URL.revokeObjectURL(removed.cutout);
+    if (removed?.sourceObjectUrl && removed.src?.startsWith?.('blob:')) URL.revokeObjectURL(removed.src);
     setItems(prev => prev.filter(it => it.id !== id));
     setSelection(prev => { const n = new Set(prev); n.delete(id); return n; });
     if (activeId === id) {
@@ -266,6 +275,10 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const bulkRemoveSelected = () => {
     if (selection.size === 0) return;
     const toRemove = new Set(selection);
+    itemsRef.current.filter(item => toRemove.has(item.id)).forEach(item => {
+      if (item.cutout?.startsWith?.('blob:')) URL.revokeObjectURL(item.cutout);
+      if (item.sourceObjectUrl && item.src?.startsWith?.('blob:')) URL.revokeObjectURL(item.src);
+    });
     setItems(prev => prev.filter(it => !toRemove.has(it.id)));
     setSelection(new Set());
     if (activeId && toRemove.has(activeId)) {
@@ -537,9 +550,12 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const applySelectedLookToBatch = async () => {
     if (!activeItem || !selectedResult) return;
-    const targets = items.filter(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout);
+    const selectedTargets = items.filter(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout);
+    const targets = selectedTargets.length
+      ? selectedTargets
+      : items.filter(item => item.id !== activeItem.id && item.cutout);
     if (!targets.length) {
-      setSaveNotice('Select at least one other ready photo first');
+      setSaveNotice('No other ready photos are available yet');
       return;
     }
 
@@ -593,6 +609,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       } catch (error) {
         setSaveNotice('The original refined picture could not be prepared');
       }
+      // Give mobile Safari a short opportunity to release temporary canvas
+      // memory before preparing the next picture.
+      await new Promise(resolve => setTimeout(resolve, 60));
     }
     setSaveNotice(`Preparing ${targets.length + 1} batch result${targets.length === 0 ? '' : 's'}…`);
     let completed = 0;
@@ -618,6 +637,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       } catch (error) {
         patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'error', error:error?.message || String(error), src:'', batchApplied:true, batchAppliedAt:appliedAt })] }));
       }
+      await new Promise(resolve => setTimeout(resolve, 60));
     }
     const readyTotal = completed + originalReady;
     setSaveNotice(`Batch ready · ${readyTotal} picture${readyTotal === 1 ? '' : 's'}${originalReady ? ', including the original' : ''}`);
@@ -1098,7 +1118,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
               <Icon name="upload" className="ico-lg"/>
             </div>
             <div className="serif" style={{fontSize:20, color:'var(--ink)'}}>Drop product photos here</div>
-            <div style={{fontSize:12.5, color:'var(--muted)', marginTop:6}}>PNG, JPG or WEBP · up to 50 files · any background works · original resolution preserved</div>
+            <div style={{fontSize:12.5, color:'var(--muted)', marginTop:6}}>PNG, JPG or WEBP · up to 50 files · any background works · mobile-safe processing</div>
             <div className="row" style={{marginTop:14, justifyContent:'center', gap:8}}>
               <button className="btn btn-blush" onClick={(e)=>{ e.stopPropagation(); fileInputRef.current && fileInputRef.current.click(); }}>
                 <Icon name="photo" className="ico-sm"/> Browse files
@@ -1139,7 +1159,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                        }}>
                     {/* Thumbnail — original with a checker for cutout preview overlay */}
                     <div style={{position:'relative', aspectRatio:'1/1', background:'conic-gradient(#F1EDE8 25%, #fff 0 50%, #F1EDE8 0 75%, #fff 0) 0 0/16px 16px'}}>
-                      <img src={it.cutout || it.manualSrc || it.src} alt={it.name}
+                      <img src={it.cutout || it.manualSrc || it.src} alt={it.name} loading="lazy" decoding="async"
                         style={{width:'100%', height:'100%', objectFit:'contain'}}/>
 
                       {/* Status ribbon */}
@@ -1252,7 +1272,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
             {batchResults.map(entry => {
               const backdrop = BACKDROPS.find(item => item.id === entry.result.backdropId);
               return <div className="saved-shot-card" key={`batch:${entry.item.id}:${entry.resultIndex}`}>
-                <div className="saved-shot-preview"><img src={entry.result.src} alt={`${entry.item.name} batch result`}/><span className="saved-shot-badge"><Icon name="copy" className="ico-sm"/> Batch</span></div>
+                <div className="saved-shot-preview"><img src={entry.result.src} alt={`${entry.item.name} batch result`} loading="lazy" decoding="async"/><span className="saved-shot-badge"><Icon name="copy" className="ico-sm"/> Batch</span></div>
                 <div className="saved-shot-meta">
                   <div className="saved-shot-name" title={entry.item.name}>{entry.item.name}</div>
                   <div className="saved-shot-details">{backdrop?.name || 'Studio shot'} · {entry.result.ratio || entry.item.ratio}</div>
@@ -1283,7 +1303,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
             {savedShots.map(shot => (
               <div className="saved-shot-card" key={shot.key}>
                 <div className="saved-shot-preview">
-                  <img src={shot.src} alt={`${shot.itemName} · ${shot.backdropName}`} />
+                  <img src={shot.src} alt={`${shot.itemName} · ${shot.backdropName}`} loading="lazy" decoding="async" />
                   <span className="saved-shot-badge"><Icon name="check" className="ico-sm"/> Saved</span>
                 </div>
                 <div className="saved-shot-meta">
@@ -1392,8 +1412,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                 <button className="btn btn-blush" disabled={!activeItem.cutout} onClick={runGenerateActive}>
                   <Icon name={activeItem.results ? 'refresh' : 'sparkles'} className="ico-sm"/> <span className="compact-action-label">{activeItem.results ? 'Re-run' : 'Generate'}</span>
                 </button>
-                <button className="btn btn-blush" title="Copy this backdrop, canvas fit, label and logo to the other selected ready photos" disabled={!selectedResult || !items.some(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout)} onClick={applySelectedLookToBatch}>
-                  <Icon name="copy" className="ico-sm"/> <span className="compact-action-label">Apply this to batch</span>
+                <button className="btn btn-blush batch-apply-btn" title="Copy this backdrop, shadow, canvas fit, label and logo to the other ready photos" disabled={!selectedResult || !items.some(item => item.id !== activeItem.id && item.cutout)} onClick={applySelectedLookToBatch}>
+                  <Icon name="copy" className="ico-sm"/> <span className="compact-action-label">{items.some(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout) ? `Apply to selected · ${items.filter(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout).length}` : `Apply to all ready · ${items.filter(item => item.id !== activeItem.id && item.cutout).length}`}</span>
                 </button>
                 <button className="btn btn-ghost" title="Close Refine" aria-label="Close Refine" onClick={()=>setShowStudioModal(false)}><Icon name="x" className="ico-sm"/> <span className="compact-action-label">Close</span></button>
               </div>
