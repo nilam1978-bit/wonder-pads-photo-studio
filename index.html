@@ -402,6 +402,7 @@
   .saved-shot-card{ min-width:0; overflow:hidden; border:1px solid rgba(196,122,184,.22); border-radius:14px; background:#fff; box-shadow:var(--shadow-sm); }
   .saved-shot-preview{ position:relative; aspect-ratio:1/1; overflow:hidden; background:conic-gradient(#F1EDE8 25%,#fff 0 50%,#F1EDE8 0 75%,#fff 0) 0 0/16px 16px; }
   .saved-shot-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .saved-shot-preview img.saved-shot-logo{ height:auto; object-fit:contain; z-index:2; }
   .saved-shot-badge{ position:absolute; top:8px; left:8px; display:inline-flex; align-items:center; gap:4px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.92); color:var(--sage-deep); font-size:10.5px; font-weight:700; box-shadow:0 2px 8px rgba(77,50,69,.10); }
   .saved-shot-meta{ padding:9px 10px 10px; }
   .saved-shot-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); font-size:12px; font-weight:700; }
@@ -508,6 +509,10 @@
   .refine-control-card .logo-tool .row.between > div:first-child{ min-width:0; }
   .refine-control-card .logo-tool .row.between > button{ flex:0 0 auto; }
   .logo-controls{ margin-top:10px; padding-top:10px; border-top:1px dashed rgba(196,122,184,.28); }
+  .logo-apply-actions{ display:grid; gap:7px; margin-top:10px; padding-top:10px; border-top:1px dashed rgba(196,122,184,.28); }
+  .logo-apply-actions .btn{ width:100%; justify-content:center; }
+  .logo-active-note,.batch-save-notice{ display:flex; align-items:center; gap:5px; color:var(--sage-deep); font-size:10.5px; font-weight:700; }
+  .batch-save-notice{ margin-top:5px; }
   .logo-file-row{ display:flex; align-items:center; gap:8px; min-width:0; }
   .logo-file-preview{ width:40px; height:40px; flex:0 0 40px; border-radius:9px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:conic-gradient(#eee 25%, #fff 0 50%, #eee 0 75%, #fff 0) 0 0/10px 10px; border:1px solid var(--line); }
   .logo-file-preview img{ width:100%; height:100%; object-fit:contain; padding:4px; }
@@ -605,7 +610,7 @@
     .logo-tool .row.between > button{ align-self:flex-start; }
   }
   @media (max-width: 700px){
-    .gallery-actions{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; }
+    .gallery-actions{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
     .gallery-action-btn{ min-width:0; padding:7px 4px; font-size:10px; white-space:normal; line-height:1.15; }
     .gallery-action-btn .ico-sm{ display:none; }
     .fabric-prep-stats{ grid-template-columns:1fr 1fr 1fr; }
