@@ -567,10 +567,37 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     const backdrop = BACKDROPS.find(item => item.id === look.backdropId);
     if (!backdrop) return;
 
-    setSaveNotice(`Applying this look to ${targets.length} photo${targets.length === 1 ? '' : 's'}…`);
+    const batchStartedAt = Date.now();
+    // Include the original refined picture in Batch Results as well as the
+    // other pictures receiving its look.
+    let originalReady = 0;
+    if (activeItem.results?.[selectedResultIdx] && selectedResult.status === 'ok') {
+      patchItem(activeItem.id, item => ({
+        ...item,
+        results: item.results.map((result, index) => index === selectedResultIdx
+          ? { ...result, batchApplied:true, batchAppliedAt:batchStartedAt }
+          : result),
+      }));
+      originalReady = 1;
+    } else if (activeItem.cutout) {
+      try {
+        const originalSrc = await window.WPBGRemoval.composite(activeItem.cutout, backdrop.spec, {
+          ratio: look.ratio,
+          longEdge: 1400,
+          padding: look.padding,
+          zoom: look.zoom,
+          ...shadowOptionsFor(look),
+        });
+        patchItem(activeItem.id, item => ({ ...item, ratio:look.ratio, results:[resultDefaults({ ...look, status:'ok', src:originalSrc, batchApplied:true, batchAppliedAt:batchStartedAt })] }));
+        originalReady = 1;
+      } catch (error) {
+        setSaveNotice('The original refined picture could not be prepared');
+      }
+    }
+    setSaveNotice(`Preparing ${targets.length + 1} batch result${targets.length === 0 ? '' : 's'}…`);
     let completed = 0;
     for (const target of targets) {
-      const appliedAt = Date.now();
+      const appliedAt = batchStartedAt + completed + 1;
       const pending = resultDefaults({ ...look, status:'pending', src:'', batchApplied:true, batchAppliedAt:appliedAt });
       patchItem(target.id, item => ({
         ...item,
@@ -592,7 +619,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'error', error:error?.message || String(error), src:'', batchApplied:true, batchAppliedAt:appliedAt })] }));
       }
     }
-    setSaveNotice(`Look applied to ${completed} of ${targets.length} selected photo${targets.length === 1 ? '' : 's'}`);
+    const readyTotal = completed + originalReady;
+    setSaveNotice(`Batch ready · ${readyTotal} picture${readyTotal === 1 ? '' : 's'}${originalReady ? ', including the original' : ''}`);
   };
 
   const labelPositionStyle = (position) => {
