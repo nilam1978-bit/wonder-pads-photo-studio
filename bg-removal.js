@@ -61,7 +61,8 @@
         if (job) {
           clearJobTimers(job);
           jobs.delete(msg.id);
-          job.resolve(msg.dataURL);
+          const output = msg.blob instanceof Blob ? URL.createObjectURL(msg.blob) : msg.dataURL;
+          job.resolve(output);
         }
         return;
       }
@@ -111,7 +112,11 @@
       }, HARD_CEILING_MS);
       armHeartbeat(job);
       jobs.set(id, job);
-      worker.postMessage({ type: 'remove', id, src });
+      const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
+      // Store outputs slightly above the 1400px studio export size. This keeps
+      // visible detail while preventing a long mobile batch from exhausting RAM.
+      const maxDimension = mobile ? 1800 : 2800;
+      worker.postMessage({ type: 'remove', id, src, maxDimension });
     });
   }
 
