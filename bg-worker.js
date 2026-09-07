@@ -53,19 +53,24 @@ async function loadModel() {
   return loading;
 }
 
-async function removeBg(src, id) {
+async function removeBg(src, id, maxDimension = 0) {
+  let pixelValues = null;
+  let outputTensor = null;
+  let orig = null;
   try {
     await loadModel();
     emit('progress', { key: 'processing', percent: 20 });
     const raw = await mod.RawImage.fromURL(src);
     emit('progress', { key: 'processing', percent: 45 });
-    const { pixel_values } = await processor(raw);
+    const processed = await processor(raw);
+    pixelValues = processed.pixel_values;
     emit('progress', { key: 'inferring', percent: 65 });
     await new Promise(r => setTimeout(r, 0));
-    const { output } = await model({ input: pixel_values });
+    const inference = await model({ input: pixelValues });
+    outputTensor = inference.output;
     emit('progress', { key: 'compositing', percent: 85 });
-    const maskData = output.data;
-    const [_, __, maskH, maskW] = output.dims;
+    const maskData = outputTensor.data;
+    const [_, __, maskH, maskW] = outputTensor.dims;
     const maskCanvas = new OffscreenCanvas(maskW, maskH);
     const mctx = maskCanvas.getContext('2d');
     const maskImg = mctx.createImageData(maskW, maskH);
@@ -77,28 +82,34 @@ async function removeBg(src, id) {
       maskImg.data[i*4+3] = v;
     }
     mctx.putImageData(maskImg, 0, 0);
-    const orig = await self.createImageBitmap(await (await fetch(src)).blob());
-    const outCanvas = new OffscreenCanvas(orig.width, orig.height);
+    orig = await self.createImageBitmap(await (await fetch(src)).blob());
+    const scale = maxDimension > 0 ? Math.min(1, maxDimension / Math.max(orig.width, orig.height)) : 1;
+    const outWidth = Math.max(1, Math.round(orig.width * scale));
+    const outHeight = Math.max(1, Math.round(orig.height * scale));
+    const outCanvas = new OffscreenCanvas(outWidth, outHeight);
     const octx = outCanvas.getContext('2d');
-    octx.drawImage(orig, 0, 0, orig.width, orig.height);
+    octx.drawImage(orig, 0, 0, outWidth, outHeight);
     octx.globalCompositeOperation = 'destination-in';
-    octx.drawImage(maskCanvas, 0, 0, orig.width, orig.height);
+    octx.drawImage(maskCanvas, 0, 0, outWidth, outHeight);
     octx.globalCompositeOperation = 'source-over';
     const blob = await outCanvas.convertToBlob({ type: 'image/png' });
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let bin = '';
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-    const dataURL = 'data:image/png;base64,' + btoa(bin);
     emit('progress', { key: 'done', percent: 100 });
-    self.postMessage({ type: 'result', id, dataURL, width: orig.width, height: orig.height });
+    // A Blob avoids creating several large base64 string copies in mobile RAM.
+    self.postMessage({ type: 'result', id, blob, width: outWidth, height: outHeight });
   } catch (err) {
     self.postMessage({ type: 'error', id, message: err && err.message ? err.message : String(err) });
+  } finally {
+    try { pixelValues?.dispose?.(); } catch (_) {}
+    try { outputTensor?.dispose?.(); } catch (_) {}
+    try { orig?.close?.(); } catch (_) {}
+    pixelValues = null;
+    outputTensor = null;
+    orig = null;
   }
 }
 
 self.addEventListener('message', (e) => {
   const msg = e.data || {};
   if (msg.type === 'init') { loadModel().catch(()=>{}); return; }
-  if (msg.type === 'remove') { removeBg(msg.src, msg.id); }
+  if (msg.type === 'remove') { removeBg(msg.src, msg.id, Number(msg.maxDimension) || 0); }
 });
