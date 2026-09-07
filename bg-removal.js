@@ -116,13 +116,17 @@
   }
 
   // === Studio backdrop compositor (main thread) ===
-  // opts: { ratio: '1:1'|'4:5'|'9:16'|'16:9'|'3:4'|'4:3', longEdge: 1400, padding: 0.10, zoom: 1, dropShadow: true }
+  // opts also supports a natural contact shadow: dropShadow, shadowOpacity,
+  // shadowSoftness and shadowOffset.
   async function composite(transparentSrc, backdrop, opts = {}) {
     const ratio = opts.ratio || '1:1';
     const longEdge = opts.longEdge || opts.size || 1400;
     const padding = opts.padding == null ? 0.10 : opts.padding;
     const zoom = Math.max(0.65, Math.min(1.45, Number(opts.zoom) || 1));
     const dropShadow = opts.dropShadow === true;
+    const shadowOpacity = Math.max(0.05, Math.min(0.5, Number(opts.shadowOpacity) || 0.20));
+    const shadowSoftness = Math.max(0.006, Math.min(0.045, Number(opts.shadowSoftness) || 0.018));
+    const shadowOffset = Math.max(0, Math.min(0.04, Number(opts.shadowOffset) || 0.012));
 
     // Compute canvas dimensions from ratio
     const [rw, rh] = ratio.split(':').map(Number);
@@ -172,9 +176,9 @@
 
     if (dropShadow && backdrop.type !== 'transparent') {
       ctx.save();
-      ctx.filter = 'blur(24px)';
-      ctx.globalAlpha = 0.35;
-      ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, x + minEdge*0.008, y + minEdge*0.02, w, h);
+      ctx.filter = `blur(${Math.max(5, minEdge * shadowSoftness)}px)`;
+      ctx.globalAlpha = shadowOpacity;
+      ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, x + minEdge*0.004, y + minEdge*shadowOffset, w, h);
       ctx.restore();
     }
 
