@@ -1,7 +1,7 @@
 // Wonder Pads Studio — Service Worker
 // v73 focused canvas editor. Network-first for app assets keeps previews and
 // deployments current, while cached files provide an offline fallback.
-const VERSION = 'wp-studio-v90-bg-removal-proxy';
+const VERSION = 'wp-studio-v93-natural-shadow';
 const APP_SHELL_CACHE = `app-shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 const APP_SHELL = [
