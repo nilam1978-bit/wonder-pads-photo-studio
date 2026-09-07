@@ -124,9 +124,9 @@
     const padding = opts.padding == null ? 0.10 : opts.padding;
     const zoom = Math.max(0.65, Math.min(1.45, Number(opts.zoom) || 1));
     const dropShadow = opts.dropShadow === true;
-    const shadowOpacity = Math.max(0.05, Math.min(0.5, Number(opts.shadowOpacity) || 0.20));
-    const shadowSoftness = Math.max(0.006, Math.min(0.045, Number(opts.shadowSoftness) || 0.018));
-    const shadowOffset = Math.max(0, Math.min(0.04, Number(opts.shadowOffset) || 0.012));
+    const shadowOpacity = Math.max(0.05, Math.min(0.5, Number(opts.shadowOpacity) || 0.26));
+    const shadowSoftness = Math.max(0.004, Math.min(0.035, Number(opts.shadowSoftness) || 0.012));
+    const shadowOffset = Math.max(0, Math.min(0.04, Number(opts.shadowOffset) || 0.016));
 
     // Compute canvas dimensions from ratio
     const [rw, rh] = ratio.split(':').map(Number);
@@ -175,10 +175,29 @@
     const y = (ch - h) / 2;
 
     if (dropShadow && backdrop.type !== 'transparent') {
+      // Turn the cutout alpha into a neutral shadow mask. Blurring the coloured
+      // product itself produces a faint coloured halo that is hard to see.
+      const shadowCanvas = document.createElement('canvas');
+      shadowCanvas.width = cleanCanvas.width;
+      shadowCanvas.height = cleanCanvas.height;
+      const shadowCtx = shadowCanvas.getContext('2d');
+      shadowCtx.drawImage(cleanCanvas, 0, 0);
+      shadowCtx.globalCompositeOperation = 'source-in';
+      shadowCtx.fillStyle = '#352A32';
+      shadowCtx.fillRect(0, 0, shadowCanvas.width, shadowCanvas.height);
+
+      // Soft outer falloff.
       ctx.save();
       ctx.filter = `blur(${Math.max(5, minEdge * shadowSoftness)}px)`;
       ctx.globalAlpha = shadowOpacity;
-      ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, x + minEdge*0.004, y + minEdge*shadowOffset, w, h);
+      ctx.drawImage(shadowCanvas, sourceX, sourceY, sourceW, sourceH, x + minEdge*0.004, y + minEdge*shadowOffset, w, h);
+      ctx.restore();
+
+      // A tighter, lighter contact edge stops the product looking suspended.
+      ctx.save();
+      ctx.filter = `blur(${Math.max(2, minEdge * 0.004)}px)`;
+      ctx.globalAlpha = Math.min(0.16, shadowOpacity * 0.55);
+      ctx.drawImage(shadowCanvas, sourceX, sourceY, sourceW, sourceH, x + minEdge*0.002, y + minEdge*0.008, w, h);
       ctx.restore();
     }
 
