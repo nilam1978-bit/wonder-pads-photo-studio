@@ -998,6 +998,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                       {/* Failure retry */}
                       {it.bgError && (
                         <div style={{position:'absolute', bottom:8, left:8, right:8}}>
+                          <div title={it.bgError} style={{marginBottom:5, padding:'4px 7px', borderRadius:8, background:'rgba(255,255,255,.94)', color:'#8A4635', fontSize:9.5, lineHeight:1.25, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical'}}>
+                            {it.bgError}
+                          </div>
                           <button className="btn btn-blush" style={{width:'100%', justifyContent:'center', padding:'5px 8px', fontSize:11}}
                             onClick={(e)=>{ e.stopPropagation(); retryBgRemoval(it.id); }}>
                             <Icon name="refresh" className="ico-sm"/> Retry
@@ -1194,7 +1197,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                         </div>
                         <div className="serif" style={{fontSize:18, color:'var(--ink)', marginTop:14}}>Original photo mode</div>
                         <div style={{fontSize:12.5, color:'var(--muted)', marginTop:6}}>Refine the finished cutout into a compact studio presentation. Background removal runs automatically after upload.</div>
-                        {activeItem.bgError && <div style={{fontSize:12, color:'#8A4635', marginTop:8}}>Background removal failed. Use Retry on the gallery card to try again.</div>}
+                        {activeItem.bgError && <div style={{fontSize:12, color:'#8A4635', marginTop:8, overflowWrap:'anywhere'}}><strong>Background removal failed:</strong> {activeItem.bgError}</div>}
                       </div>
                     )}
 
