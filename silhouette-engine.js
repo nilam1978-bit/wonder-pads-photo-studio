@@ -2,7 +2,7 @@
 (function(root){
   const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
   const uid=()=>`s${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`;
-  const empty=()=>({assets:[],folders:[],layers:[],nodes:[],stage:'pieces',name:'pad-silhouette'});
+  const empty=()=>({assets:[],folders:[],savedPieces:[],layers:[],nodes:[],stage:'pieces',name:'pad-silhouette'});
   const images=new Map();
   const image=src=>{if(!images.has(src))images.set(src,new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>{images.delete(src);reject(new Error('This image could not be opened.'));};im.src=src;}));return images.get(src);};
   const turn=(p,deg)=>{const a=deg*Math.PI/180;return{x:p.x*Math.cos(a)-p.y*Math.sin(a),y:p.x*Math.sin(a)+p.y*Math.cos(a)};};
