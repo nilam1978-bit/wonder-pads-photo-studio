@@ -496,6 +496,47 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
+  const makeZipBlob = (files) => {
+    const encoder = new TextEncoder();
+    const crcTable = makeZipBlob.crcTable || (makeZipBlob.crcTable = Array.from({ length:256 }, (_, value) => {
+      let crc = value;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? (0xEDB88320 ^ (crc >>> 1)) : (crc >>> 1);
+      return crc >>> 0;
+    }));
+    const crc32 = (bytes) => {
+      let crc = 0xFFFFFFFF;
+      for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    };
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    for (const file of files) {
+      const name = encoder.encode(file.name);
+      const bytes = file.bytes;
+      const crc = crc32(bytes);
+      const local = new Uint8Array(30 + name.length);
+      const lv = new DataView(local.buffer);
+      lv.setUint32(0, 0x04034B50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+      lv.setUint16(8, 0, true); lv.setUint32(14, crc, true); lv.setUint32(18, bytes.length, true); lv.setUint32(22, bytes.length, true); lv.setUint16(26, name.length, true);
+      local.set(name, 30);
+      localParts.push(local, bytes);
+
+      const central = new Uint8Array(46 + name.length);
+      const cv = new DataView(central.buffer);
+      cv.setUint32(0, 0x02014B50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true);
+      cv.setUint16(10, 0, true); cv.setUint32(16, crc, true); cv.setUint32(20, bytes.length, true); cv.setUint32(24, bytes.length, true); cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true);
+      central.set(name, 46);
+      centralParts.push(central);
+      offset += local.length + bytes.length;
+    }
+    const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+    const end = new Uint8Array(22);
+    const ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054B50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true); ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+    return new Blob([...localParts, ...centralParts, end], { type:'application/zip' });
+  };
+
   const saveDataUrlToPhone = async (src, filename) => {
     if (!src || !filename) return;
     try {
@@ -534,6 +575,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const [savingSelectedResult, setSavingSelectedResult] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
   const [batchSaveNotice, setBatchSaveNotice] = useState('');
+  const [savingBatchAll, setSavingBatchAll] = useState(false);
   useEffect(() => {
     try { localStorage.setItem('wp_saved_shots', JSON.stringify(savedShots)); } catch (_) {}
     window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
@@ -733,18 +775,34 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     setSaveNotice(`Logo applied to ${count} ready photo${count === 1 ? '' : 's'}`);
   };
 
-  const renderFinishedShot = async (result, format = 'png') => {
+  const renderFinishedShot = async (result, format = 'png', item = activeItem, highQuality = false) => {
     if (!result?.src || result.status !== 'ok') return null;
+    let baseSrc = result.src;
+    if (highQuality && item?.cutout) {
+      const backdrop = BACKDROPS.find(entry => entry.id === result.backdropId);
+      if (backdrop) {
+        const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
+        baseSrc = await window.WPBGRemoval.composite(item.cutout, backdrop.spec, {
+          ratio:result.ratio || item.ratio || '1:1',
+          longEdge:mobile ? 2400 : 2800,
+          padding:Number(result.padding) || 0.10,
+          zoom:Number(result.zoom) || 1,
+          ...shadowOptionsFor(result),
+        });
+      }
+    }
     const image = await new Promise((resolve, reject) => {
       const loaded = new Image();
       loaded.onload = () => resolve(loaded);
       loaded.onerror = reject;
-      loaded.src = result.src;
+      loaded.src = baseSrc;
     });
     const canvas = document.createElement('canvas');
     canvas.width = image.naturalWidth || image.width;
     canvas.height = image.naturalHeight || image.height;
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     if (result.logoDataUrl) {
@@ -809,14 +867,14 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const downloadFinishedShot = async (result, item = activeItem, format = exportFormat) => {
     if (!item || !result || result.status !== 'ok') return;
-    const output = await renderFinishedShot(result, format);
+    const output = await renderFinishedShot(result, format, item, true);
     if (!output) return;
     downloadOne(output, shotFilename(result, item, format));
   };
 
   const saveFinishedShotToPhone = async (result = selectedResult, item = activeItem) => {
     if (!item || !result || result.status !== 'ok') return 'failed';
-    const output = await renderFinishedShot(result, exportFormat);
+    const output = await renderFinishedShot(result, exportFormat, item, true);
     if (!output) return;
     const status = await saveDataUrlToPhone(output, shotFilename(result, item, exportFormat));
     setSaveNotice(status === 'shared' ? 'Share sheet opened' : status === 'downloaded' ? 'Saved to downloads' : status === 'opened' ? 'Image opened — long-press to save' : 'Could not save automatically');
@@ -827,6 +885,38 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     setBatchSaveNotice('Preparing picture…');
     const status = await saveFinishedShotToPhone(entry.result, entry.item);
     setBatchSaveNotice(status === 'shared' ? 'Choose Save Image in the share sheet' : status === 'downloaded' ? 'Saved to Downloads' : status === 'opened' ? 'Image opened — hold it and choose Save to Photos' : 'Could not save automatically');
+  };
+
+  const saveAllBatchResultsToPhone = async () => {
+    if (!batchResults.length || savingBatchAll) return;
+    setSavingBatchAll(true);
+    setBatchSaveNotice(`Preparing 1 of ${batchResults.length} pictures…`);
+    try {
+      const files = [];
+      for (let index = 0; index < batchResults.length; index += 1) {
+        const entry = batchResults[index];
+        setBatchSaveNotice(`Preparing ${index + 1} of ${batchResults.length} pictures…`);
+        const output = await renderFinishedShot(entry.result, exportFormat, entry.item, true);
+        if (output) {
+          const blob = await (await fetch(output)).blob();
+          const safeName = shotFilename(entry.result, entry.item, exportFormat).replace(/[\\/:*?"<>|]+/g, '-');
+          files.push({ name:`${String(index + 1).padStart(2, '0')}-${safeName}`, bytes:new Uint8Array(await blob.arrayBuffer()) });
+        }
+        await new Promise(resolve => setTimeout(resolve, 60));
+      }
+      if (!files.length) throw new Error('No finished pictures were available');
+      setBatchSaveNotice('Creating your download folder…');
+      const zip = makeZipBlob(files);
+      const url = URL.createObjectURL(zip);
+      downloadOne(url, `wonder-pads-batch-${new Date().toISOString().slice(0, 10)}.zip`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setBatchSaveNotice(`${files.length} pictures saved in one ZIP folder`);
+    } catch (error) {
+      console.warn('Could not save batch', error);
+      setBatchSaveNotice('Could not save the complete batch. Individual Save to phone buttons still work.');
+    } finally {
+      setSavingBatchAll(false);
+    }
   };
 
   const downloadAllForGallery = async () => {
@@ -1300,7 +1390,10 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
               <div className="saved-gallery-note">Pictures created by Apply this to batch. Open one to adjust it, or save it to your phone.</div>
               {batchSaveNotice && <div className="batch-save-notice" role="status">{batchSaveNotice}</div>}
             </div>
-            <span className="pill pill-blush"><Icon name="copy" className="ico-sm"/> {batchResults.length} applied</span>
+            <div className="batch-gallery-actions">
+              <span className="pill pill-blush"><Icon name="copy" className="ico-sm"/> {batchResults.length} applied</span>
+              <button type="button" className="btn btn-primary" disabled={savingBatchAll} onClick={saveAllBatchResultsToPhone}><Icon name={savingBatchAll ? 'refresh' : 'download'} className="ico-sm"/> {savingBatchAll ? 'Preparing…' : 'Save all to phone'}</button>
+            </div>
           </div>
           <div className="saved-gallery-grid">
             {batchResults.map(entry => {
