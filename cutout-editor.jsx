@@ -33,6 +33,7 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
   const activePointers = useRef(new Map());
   const pinchStart = useRef(null);
   const restoreStampCanvasRef = useRef(null);
+  const renderFrameRef = useRef(null);
 
   // Load images + init work canvas
   useEffect(() => {
@@ -42,7 +43,11 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
       if (cancelled) return;
       originalImgRef.current = orig;
       cutoutImgRef.current = cut;
-      const w = orig.naturalWidth, h = orig.naturalHeight;
+      // Edit at the cutout's actual working resolution. The mobile BG remover
+      // deliberately caps this resolution; expanding it back to the original
+      // 4284×5712 photo made every brush move redraw tens of millions of pixels.
+      const w = cut.naturalWidth || orig.naturalWidth;
+      const h = cut.naturalHeight || orig.naturalHeight;
       setImgDims({ w, h });
       const wc = document.createElement('canvas');
       wc.width = w; wc.height = h;
@@ -51,10 +56,13 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
       workCanvasRef.current = wc;
       setLoaded(true);
       // Initial fit
-      queueMicrotask(() => fitToView());
+      requestAnimationFrame(() => fitToView(w, h));
       renderView();
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (renderFrameRef.current) cancelAnimationFrame(renderFrameRef.current);
+    };
   }, [original, cutout]);
 
   // Redraw the visible canvas whenever state changes
@@ -70,13 +78,21 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
     });
   }
 
-  function fitToView() {
+  function fitToView(width = imgDims.w, height = imgDims.h) {
     const stage = stageRef.current;
-    if (!stage || !imgDims.w) return;
+    if (!stage || !width || !height) return;
     const rect = stage.getBoundingClientRect();
-    const s = Math.min(rect.width / imgDims.w, rect.height / imgDims.h) * 0.92;
+    const s = Math.min(rect.width / width, rect.height / height) * 0.92;
     setZoom(s);
-    setPan({ x: rect.width/2 - (imgDims.w * s)/2, y: rect.height/2 - (imgDims.h * s)/2 });
+    setPan({ x: rect.width/2 - (width * s)/2, y: rect.height/2 - (height * s)/2 });
+  }
+
+  function scheduleRender() {
+    if (renderFrameRef.current) return;
+    renderFrameRef.current = requestAnimationFrame(() => {
+      renderFrameRef.current = null;
+      renderView();
+    });
   }
 
   function renderView() {
@@ -109,7 +125,8 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
     ctx.scale(zoom, zoom);
 
     if (showOriginal && originalImgRef.current) {
-      ctx.drawImage(originalImgRef.current, 0, 0);
+      const wc = workCanvasRef.current;
+      ctx.drawImage(originalImgRef.current, 0, 0, wc?.width || imgDims.w, wc?.height || imgDims.h);
     } else if (workCanvasRef.current) {
       // For invert view, tint transparent regions differently by drawing a soft outline first
       ctx.drawImage(workCanvasRef.current, 0, 0);
@@ -166,7 +183,9 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
       const tctx = tmp.getContext('2d', { willReadFrequently:false });
       tctx.clearRect(0, 0, size, size);
       // Copy only the source pixels under this brush stamp.
-      tctx.drawImage(orig, imgX - pad, imgY - pad, size, size, 0, 0, size, size);
+      const scaleX = orig.naturalWidth / wc.width;
+      const scaleY = orig.naturalHeight / wc.height;
+      tctx.drawImage(orig, (imgX - pad) * scaleX, (imgY - pad) * scaleY, size * scaleX, size * scaleY, 0, 0, size, size);
       const grd = tctx.createRadialGradient(pad, pad, r * (1 - feather), pad, pad, r);
       grd.addColorStop(0, 'rgba(0,0,0,1)');
       grd.addColorStop(1, 'rgba(0,0,0,0)');
@@ -178,11 +197,11 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
     }
   }
 
-  function drawStrokeBetween(a, b) {
+  function drawStrokeBetween(a, b, mobile = false) {
     // Interpolate stamps along the line so a fast drag stays continuous
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.hypot(dx, dy);
-    const step = Math.max(brushSize / 6, 2);
+    const step = Math.max(brushSize / (mobile ? 3 : 6), mobile ? 3 : 2);
     const n = Math.max(1, Math.ceil(dist / step));
     for (let i = 1; i <= n; i++) {
       const t = i / n;
@@ -238,7 +257,7 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
     isDrawing.current = true;
     lastPt.current = { x: p.imgX, y: p.imgY };
     stampAt(p.imgX, p.imgY);
-    renderView();
+    scheduleRender();
   }
 
   function onPointerMove(e) {
@@ -266,16 +285,16 @@ const CutoutEditor = ({ original, cutout, onSave, onClose }) => {
       }
     }
     const p = toImageCoord(e.clientX, e.clientY);
-    setCursor({ x: p.viewX, y: p.viewY, visible: true });
+    if (e.pointerType !== 'touch') setCursor({ x: p.viewX, y: p.viewY, visible: true });
 
     if (isPanning.current && panStart.current) {
       setPan({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y });
       return;
     }
     if (isDrawing.current) {
-      drawStrokeBetween(lastPt.current, { x: p.imgX, y: p.imgY });
+      drawStrokeBetween(lastPt.current, { x: p.imgX, y: p.imgY }, e.pointerType === 'touch');
       lastPt.current = { x: p.imgX, y: p.imgY };
-      renderView();
+      scheduleRender();
     }
   }
 
