@@ -752,20 +752,22 @@
     .studio-modal,.collage-modal{ width:100%; max-width:100%; max-height:100dvh; border-radius:16px; }
     .studio-modal{ display:block; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; }
     .studio-modal-head,.collage-modal-head{ padding:12px; flex-direction:column; align-items:stretch; gap:10px; }
+    .studio-modal-head>div:first-child{ flex:none; min-width:0; max-width:none; }
     .studio-modal-title,.collage-modal-title{ font-size:22px; line-height:1.1; }
     .studio-modal-sub,.collage-modal-sub{ font-size:11px; line-height:1.4; }
     .studio-modal-head-actions,.collage-modal-head > .row{ width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+    .studio-modal-head-actions{ flex:none; }
     .studio-modal-head-actions .btn,.collage-modal-head > .row .btn{ min-width:0; width:100%; justify-content:center; padding:8px 5px; font-size:10.5px; }
-    .studio-modal-head-actions .btn .compact-action-label{ display:none; }
+    .studio-modal-head-actions .btn .compact-action-label{ display:inline; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .studio-modal-head-actions .batch-apply-btn{ grid-column:1 / -1; }
     .studio-modal-head-actions .batch-apply-btn .compact-action-label{ display:inline!important; }
-    .studio-modal-head-actions .btn{ min-height:36px; gap:0; }
+    .studio-modal-head-actions .btn{ min-height:38px; gap:5px; }
     .studio-modal-head-actions .generation-count-control{ min-height:36px; }
     .studio-modal-head-actions .save-notice{ grid-column:1 / -1; text-align:left; }
     .studio-modal-head-actions .generation-count-control{ width:100%; min-width:0; justify-content:center; }
-    .studio-modal-head-actions{ grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; }
+    .studio-modal-head-actions{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
     .studio-modal-head-actions .generation-count-control{ padding:8px 3px; gap:2px; }
-    .studio-modal-head-actions .generation-count-control > span{ display:none; }
+    .studio-modal-head-actions .generation-count-control > span{ display:inline; }
     .studio-modal-head-actions .generation-count-control select{ min-width:0; width:auto; border:0; background:transparent; padding:0 2px; font-size:10.5px; }
     .studio-modal-body,.collage-modal-body{ grid-template-columns:1fr; overflow:visible; }
     .refine-rail{ position:static; left:auto; right:auto; bottom:auto; z-index:auto; width:auto!important; max-height:none; overflow:visible; margin:0 10px 12px; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
