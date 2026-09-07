@@ -60,6 +60,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     zoom: Number(studioSettings.zoom) || 1,
     padding: Number(studioSettings.padding) || 0.10,
     fitApplied: true,
+    shadowEnabled: studioSettings.shadowEnabled !== false,
+    shadowStrength: Number(studioSettings.shadowStrength) || 0.20,
+    shadowSoftness: Number(studioSettings.shadowSoftness) || 0.018,
     labelText: studioSettings.labelText || '',
     labelPosition: studioSettings.labelPosition || 'bottom-left',
     labelSize: studioSettings.labelSize || 'medium',
@@ -72,6 +75,12 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     logoScale: Number(studioSettings.logoScale) || 0.18,
     logoOpacity: studioSettings.logoOpacity == null ? 1 : Number(studioSettings.logoOpacity),
     ...extra,
+  });
+  const shadowOptionsFor = (result) => ({
+    dropShadow: result?.shadowEnabled !== false,
+    shadowOpacity: Number(result?.shadowStrength) || 0.20,
+    shadowSoftness: Number(result?.shadowSoftness) || 0.018,
+    shadowOffset: 0.012,
   });
 
   const applyStudioPreset = (id) => {
@@ -235,6 +244,15 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const retryBgRemoval = (id) => startBgRemoval(id);
 
+  const runBgRemovalBatch = () => {
+    const targetIds = selection.size > 0 ? Array.from(selection) : items.map(it => it.id);
+    targetIds.forEach((id) => {
+      const item = itemsRef.current.find(it => it.id === id) || items.find(it => it.id === id);
+      if (!item || item.cutout || ['queued','processing'].includes(item.bgProgress?.key)) return;
+      startBgRemoval(id);
+    });
+  };
+
   const toggleSelection = (id) => {
     setSelection(prev => {
       const n = new Set(prev);
@@ -279,7 +297,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
           longEdge: 1400,
           padding: Number(current.padding) || 0.10,
           zoom: Number(current.zoom) || 1,
-          dropShadow: false,
+          ...shadowOptionsFor(current),
         });
         if (ratioRenderTokens.current.get(renderKey) !== renderToken) return;
         patchItem(activeItem.id, (it) => ({
@@ -321,7 +339,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       const ratio = ratios[i];
       const bd = BACKDROPS.find(b => b.id === id);
       try {
-        const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(studioSettings.padding) || 0.10, zoom:Number(studioSettings.zoom) || 1, dropShadow: false });
+        const currentLook = activeItem.results?.[i] || resultDefaults();
+        const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(currentLook.padding) || 0.10, zoom:Number(currentLook.zoom) || 1, ...shadowOptionsFor(currentLook) });
         return resultDefaults({ status:'ok', src, backdropId: id, ratio });
       } catch (e) {
         return resultDefaults({ status:'error', error: e.message, backdropId: id, ratio });
@@ -342,7 +361,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       const outs = await Promise.all(ids.map(async (bid) => {
         const bd = BACKDROPS.find(b => b.id === bid);
         try {
-          const src = await window.WPBGRemoval.composite(it.cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(studioSettings.padding) || 0.10, zoom:Number(studioSettings.zoom) || 1, dropShadow: false });
+          const currentLook = it.results?.find(result => result.backdropId === bid) || resultDefaults();
+          const src = await window.WPBGRemoval.composite(it.cutout, bd.spec, { ratio, longEdge: 1400, padding: Number(currentLook.padding) || 0.10, zoom:Number(currentLook.zoom) || 1, ...shadowOptionsFor(currentLook) });
           return resultDefaults({ status:'ok', src, backdropId: bid, ratio });
         } catch (e) {
           return resultDefaults({ status:'error', error: e.message, backdropId: bid, ratio });
@@ -365,7 +385,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       const zoom = Number(activeItem.results[resultIndex]?.zoom) || 1;
     const padding = Number(activeItem.results[resultIndex]?.padding) || 0.10;
     try {
-      const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio, longEdge: 1400, padding, zoom });
+      const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio, longEdge: 1400, padding, zoom, ...shadowOptionsFor(activeItem.results[resultIndex]) });
       patchItem(activeItem.id, (it) => ({ ...it, results: it.results.map((r,i) => i===resultIndex ? { ...r, status:'ok', src, backdropId:newBackdropId, ratio } : r) }));
     } catch (e) {
       patchItem(activeItem.id, (it) => ({ ...it, results: it.results.map((r,i) => i===resultIndex ? { ...r, status:'error', error:e.message, backdropId:newBackdropId, ratio } : r) }));
@@ -385,7 +405,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     const zoom = Number(r.zoom) || 1;
     const bd = BACKDROPS.find(b => b.id === r.backdropId);
     try {
-      const src = await window.WPBGRemoval.composite(cutout, bd.spec, {         ratio: newRatio, longEdge: 1400, padding: Number(r.padding) || 0.10, zoom });
+      const src = await window.WPBGRemoval.composite(cutout, bd.spec, { ratio: newRatio, longEdge: 1400, padding: Number(r.padding) || 0.10, zoom, ...shadowOptionsFor(r) });
       patchItem(activeItem.id, (it) => ({ ...it, results: it.results.map((x,i) => i===resultIndex ? { ...x, status:'ok', src, backdropId:r.backdropId, ratio:newRatio } : x) }));
     } catch (e) {
       patchItem(activeItem.id, (it) => ({ ...it, results: it.results.map((x,i) => i===resultIndex ? { ...x, status:'error', error:e.message, backdropId:r.backdropId, ratio:newRatio } : x) }));
@@ -412,6 +432,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         longEdge: 1400,
         padding: Number(current.padding) || 0.10,
         zoom,
+        ...shadowOptionsFor(current),
       });
       patchItem(activeItem.id, (it) => ({
         ...it,
@@ -427,6 +448,30 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const fitSelectedResult = () => recomposeResultAtZoom(selectedResultIdx, 1, true);
   const zoomSelectedResult = (value) => recomposeResultAtZoom(selectedResultIdx, value, false);
+
+  const updateSelectedShadow = async (delta) => {
+    if (!activeItem || !selectedResult) return;
+    const next = { ...selectedResult, ...delta };
+    if (!activeItem.cutout || !activeItem.results?.[selectedResultIdx]) {
+      patchSelectedResult(delta);
+      return;
+    }
+    const backdrop = BACKDROPS.find(item => item.id === next.backdropId);
+    if (!backdrop) return;
+    patchSelectedResult({ ...delta, status:'pending' });
+    try {
+      const src = await window.WPBGRemoval.composite(activeItem.cutout, backdrop.spec, {
+        ratio: next.ratio || activeItem.ratio,
+        longEdge: 1400,
+        padding: Number(next.padding) || 0.10,
+        zoom: Number(next.zoom) || 1,
+        ...shadowOptionsFor(next),
+      });
+      patchSelectedResult({ ...delta, status:'ok', src });
+    } catch (error) {
+      patchSelectedResult({ ...delta, status:'error', error:error?.message || String(error) });
+    }
+  };
 
   const downloadOne = (src, filename) => {
     const a = document.createElement('a');
@@ -464,12 +509,22 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       return Array.isArray(value) ? value : [];
     } catch (_) { return []; }
   });
+  const [savedLogos, setSavedLogos] = useState(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem('wp_saved_logos') || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch (_) { return []; }
+  });
   const [savingSelectedResult, setSavingSelectedResult] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
   useEffect(() => {
     try { localStorage.setItem('wp_saved_shots', JSON.stringify(savedShots)); } catch (_) {}
     window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
   }, [savedShots]);
+  useEffect(() => {
+    try { localStorage.setItem('wp_saved_logos', JSON.stringify(savedLogos)); }
+    catch (_) { setSaveNotice('Logo is active, but this device did not have enough storage to save it'); }
+  }, [savedLogos]);
 
   const selectedResult = activeItem?.results?.[selectedResultIdx] || activeItem?.previewDraft || null;
   const patchSelectedResult = useCallback((delta) => {
@@ -479,6 +534,65 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       : { ...it, previewDraft: { ...(it.previewDraft || {}), ...delta } }
     );
   }, [activeItem, selectedResult, selectedResultIdx, patchItem]);
+
+  const applySelectedLookToBatch = async () => {
+    if (!activeItem || !selectedResult) return;
+    const targets = items.filter(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout);
+    if (!targets.length) {
+      setSaveNotice('Select at least one other ready photo first');
+      return;
+    }
+
+    const look = {
+      backdropId: selectedResult.backdropId || activeItem.chosenBackdropIds?.[0] || presetBackdropIds[0],
+      ratio: selectedResult.ratio || activeItem.ratio || '1:1',
+      zoom: Number(selectedResult.zoom) || 1,
+      padding: Number(selectedResult.padding) || 0.10,
+      fitApplied: selectedResult.fitApplied !== false,
+      shadowEnabled: selectedResult.shadowEnabled !== false,
+      shadowStrength: Number(selectedResult.shadowStrength) || 0.20,
+      shadowSoftness: Number(selectedResult.shadowSoftness) || 0.018,
+      labelText: selectedResult.labelText || '',
+      labelPosition: selectedResult.labelPosition || 'bottom-left',
+      labelSize: selectedResult.labelSize || 'medium',
+      labelBackground: selectedResult.labelBackground !== false,
+      labelColor: selectedResult.labelColor || '#4D3245',
+      labelBackgroundColor: selectedResult.labelBackgroundColor || '#FFF1F8',
+      logoDataUrl: selectedResult.logoDataUrl || '',
+      logoName: selectedResult.logoName || '',
+      logoPosition: selectedResult.logoPosition || 'top-right',
+      logoScale: Number(selectedResult.logoScale) || 0.18,
+      logoOpacity: selectedResult.logoOpacity == null ? 1 : Number(selectedResult.logoOpacity),
+    };
+    const backdrop = BACKDROPS.find(item => item.id === look.backdropId);
+    if (!backdrop) return;
+
+    setSaveNotice(`Applying this look to ${targets.length} photo${targets.length === 1 ? '' : 's'}…`);
+    let completed = 0;
+    for (const target of targets) {
+      const pending = resultDefaults({ ...look, status:'pending', src:'' });
+      patchItem(target.id, item => ({
+        ...item,
+        ratio: look.ratio,
+        chosenBackdropIds: [look.backdropId, ...(item.chosenBackdropIds || []).filter(id => id !== look.backdropId)].slice(0, 4),
+        results: [pending],
+      }));
+      try {
+        const src = await window.WPBGRemoval.composite(target.cutout, backdrop.spec, {
+          ratio: look.ratio,
+          longEdge: 1400,
+          padding: look.padding,
+          zoom: look.zoom,
+          ...shadowOptionsFor(look),
+        });
+        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'ok', src })] }));
+        completed += 1;
+      } catch (error) {
+        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'error', error:error?.message || String(error), src:'' })] }));
+      }
+    }
+    setSaveNotice(`Look applied to ${completed} of ${targets.length} selected photo${targets.length === 1 ? '' : 's'}`);
+  };
 
   const labelPositionStyle = (position) => {
     const base = { position:'absolute', bottom:12, maxWidth:'78%', fontWeight:700, letterSpacing:'.01em', lineHeight:1.15, textAlign:'center', pointerEvents:'none' };
@@ -495,17 +609,48 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     return { ...base, top:10, right:10 };
   };
 
+  const prepareLogoForDevice = async (file) => {
+    const original = await readFileAsDataURL(file);
+    if (file.type === 'image/svg+xml') return original;
+    const image = await new Promise((resolve, reject) => {
+      const loaded = new Image();
+      loaded.onload = () => resolve(loaded);
+      loaded.onerror = reject;
+      loaded.src = original;
+    });
+    const scale = Math.min(1, 640 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  };
+
   const handleLogoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !selectedResult) return;
     try {
-      const dataUrl = await readFileAsDataURL(file);
+      const dataUrl = await prepareLogoForDevice(file);
       patchSelectedResult({ logoDataUrl:dataUrl, logoName:file.name, logoScale: selectedResult.logoScale || 0.18, logoOpacity: selectedResult.logoOpacity ?? 1, logoPosition: selectedResult.logoPosition || 'top-right' });
+      setSavedLogos(previous => {
+        const withoutSameName = previous.filter(logo => logo.name !== file.name);
+        return [...withoutSameName, { id:`logo_${Date.now()}`, name:file.name, dataUrl }].slice(-8);
+      });
+      setSaveNotice('Logo saved on this device');
     } catch (err) {
       console.warn('Logo could not be read', err);
     } finally {
       e.target.value = '';
     }
+  };
+
+  const useSavedLogo = (logo) => {
+    patchSelectedResult({ logoDataUrl:logo.dataUrl, logoName:logo.name, logoScale:selectedResult?.logoScale || 0.18, logoOpacity:selectedResult?.logoOpacity ?? 1, logoPosition:selectedResult?.logoPosition || 'top-right' });
+    setSaveNotice('Saved logo applied');
+  };
+
+  const forgetSavedLogo = (id) => {
+    setSavedLogos(previous => previous.filter(logo => logo.id !== id));
   };
 
   const clearLogo = () => patchSelectedResult({ logoDataUrl:'', logoName:'', logoScale:0.18, logoOpacity:1, logoPosition:'top-right' });
@@ -856,8 +1001,11 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                     <button className="btn btn-ghost" style={{padding:'7px 12px', fontSize:12, color:'#B84A5F'}} onClick={bulkRemoveSelected}>
                       <Icon name="trash" className="ico-sm"/> Remove
                     </button>
-                    <button className="btn btn-primary" style={{padding:'7px 12px', fontSize:12}} onClick={runGenerateBatch}>
-                      <Icon name="sparkles" className="ico-sm"/> Generate for {selection.size}
+                    <button className="btn btn-blush" style={{padding:'7px 12px', fontSize:12}} disabled={!items.some(item => selection.has(item.id) && !item.cutout && !['queued','processing'].includes(item.bgProgress?.key))} onClick={runBgRemovalBatch}>
+                      <Icon name="scissors" className="ico-sm"/> Remove BG · {items.filter(item => selection.has(item.id) && !item.cutout && !['queued','processing'].includes(item.bgProgress?.key)).length}
+                    </button>
+                    <button className="btn btn-primary" style={{padding:'7px 12px', fontSize:12}} disabled={!items.some(item => selection.has(item.id) && item.cutout)} onClick={runGenerateBatch}>
+                      <Icon name="sparkles" className="ico-sm"/> Generate shots · {items.filter(item => selection.has(item.id) && item.cutout).length}
                     </button>
                   </>
                 ) : (
@@ -1179,6 +1327,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                 <button className="btn btn-blush" disabled={!activeItem.cutout} onClick={runGenerateActive}>
                   <Icon name={activeItem.results ? 'refresh' : 'sparkles'} className="ico-sm"/> <span className="compact-action-label">{activeItem.results ? 'Re-run' : 'Generate'}</span>
                 </button>
+                <button className="btn btn-blush" title="Copy this backdrop, canvas fit, label and logo to the other selected ready photos" disabled={!selectedResult || !items.some(item => selection.has(item.id) && item.id !== activeItem.id && item.cutout)} onClick={applySelectedLookToBatch}>
+                  <Icon name="copy" className="ico-sm"/> <span className="compact-action-label">Apply this to batch</span>
+                </button>
                 <button className="btn btn-ghost" title="Close Refine" aria-label="Close Refine" onClick={()=>setShowStudioModal(false)}><Icon name="x" className="ico-sm"/> <span className="compact-action-label">Close</span></button>
               </div>
             </div>
@@ -1258,7 +1409,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                     <div className="refine-rail-note">{activeItem.results ? 'Adjust the presentation of this result. Changes update the preview and are included in the global export.' : 'Set the canvas, backdrop, fit, branding, and label now. These choices stay with the photo and will be used after BG Remove.'}</div>
 
                     <div className="refine-tool-ribbon" role="tablist" aria-label="Refine tools">
-                      {[['canvas','Canvas'],['backdrop','Backdrop'],['fit','Fit'],['branding','Branding'],['label','Label']].map(([value,label]) => <button type="button" key={value} role="tab" aria-selected={refineTool===value} className={'refine-tool-tab'+(refineTool===value?' on':'')} onClick={()=>setRefineTool(current => current === value ? null : value)}>{label}</button>)}
+                      {[['canvas','Canvas'],['backdrop','Backdrop'],['fit','Fit'],['shadow','Shadow'],['branding','Branding'],['label','Label']].map(([value,label]) => <button type="button" key={value} role="tab" aria-selected={refineTool===value} className={'refine-tool-tab'+(refineTool===value?' on':'')} onClick={()=>setRefineTool(current => current === value ? null : value)}>{label}</button>)}
                     </div>
                     <div className="refine-tool-hint">Choose a tool to focus its controls. Changes remain live in {activeItem.results ? 'the selected studio shot.' : 'this photo setup.'}</div>
                     {refineTool === 'canvas' && <div className="refine-tool-panel">
@@ -1293,6 +1444,13 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                       <label className="fit-zoom-row"><span className="refine-mini-label">Zoom</span><input type="range" min="0.65" max="1.45" step="0.01" value={Number(selectedResult?.zoom) || 1} onChange={(e)=>zoomSelectedResult(Number(e.target.value))}/><span className="zoom-value">{Math.round((Number(selectedResult?.zoom) || 1) * 100)}%</span></label>
                     </div>
                     </div>}
+                    {refineTool === 'shadow' && <div className="refine-tool-panel">
+                      <div className="fit-tool">
+                        <div className="fit-tool-head"><div><div className="serif" style={{fontSize:17}}>Natural contact shadow</div><div className="fit-tool-note">A soft shadow anchors the pad to the surface. It is hidden on transparent exports.</div></div><label className="row" style={{gap:6, fontSize:11, fontWeight:700}}><input type="checkbox" checked={selectedResult?.shadowEnabled !== false} onChange={(e)=>updateSelectedShadow({shadowEnabled:e.target.checked})}/> On</label></div>
+                        <label className="fit-zoom-row"><span className="refine-mini-label">Strength</span><input type="range" min="0.08" max="0.38" step="0.01" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowStrength) || 0.20} onChange={(e)=>updateSelectedShadow({shadowStrength:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowStrength) || 0.20)*100)}%</span></label>
+                        <label className="fit-zoom-row"><span className="refine-mini-label">Softness</span><input type="range" min="0.008" max="0.035" step="0.001" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowSoftness) || 0.018} onChange={(e)=>updateSelectedShadow({shadowSoftness:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowSoftness) || 0.018)*1000)}</span></label>
+                      </div>
+                    </div>}
                     {refineTool === 'branding' && <div className="refine-tool-panel">
                     <div className="logo-tool">
                       <input ref={logoInputRef} type="file" accept="image/png,image/svg+xml,image/webp,image/jpeg" onChange={handleLogoUpload} style={{display:'none'}}/>
@@ -1300,6 +1458,15 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                         <div><div className="serif" style={{fontSize:18}}>Logo</div><div style={{fontSize:11, color:'var(--muted)', marginTop:2}}>Applied to this shot and included in global export.</div></div>
                         {!selectedResult?.logoDataUrl ? <button type="button" className="btn btn-blush" style={{padding:'7px 10px', fontSize:11}} onClick={()=>logoInputRef.current?.click()}><Icon name="upload" className="ico-sm"/> Upload</button> : <button type="button" className="btn btn-ghost" style={{padding:'7px 10px', fontSize:11}} onClick={()=>logoInputRef.current?.click()}><Icon name="refresh" className="ico-sm"/> Replace</button>}
                       </div>
+                      {savedLogos.length > 0 && <div style={{marginTop:12, paddingTop:10, borderTop:'1px solid var(--line)'}}>
+                        <div className="row between" style={{gap:8, marginBottom:7}}><span className="refine-mini-label">Saved on this device</span><span style={{fontSize:9.5, color:'var(--muted)'}}>Tap to reuse</span></div>
+                        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(74px,1fr))', gap:7}}>
+                          {savedLogos.map(logo => <div key={logo.id} style={{position:'relative', minWidth:0}}>
+                            <button type="button" title={`Use ${logo.name}`} onClick={()=>useSavedLogo(logo)} style={{width:'100%', minHeight:68, display:'grid', placeItems:'center', padding:7, border:selectedResult?.logoDataUrl === logo.dataUrl ? '2px solid var(--blush-deep)' : '1px solid var(--line)', borderRadius:10, background:'#fff', cursor:'pointer'}}><img src={logo.dataUrl} alt={logo.name} style={{display:'block', maxWidth:'100%', maxHeight:42, objectFit:'contain'}}/><span style={{display:'block', width:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:8.5, color:'var(--muted)'}}>{logo.name}</span></button>
+                            <button type="button" title="Forget this saved logo" aria-label={`Forget ${logo.name}`} onClick={()=>forgetSavedLogo(logo.id)} style={{position:'absolute', top:-4, right:-4, width:19, height:19, display:'grid', placeItems:'center', padding:0, border:'1px solid var(--line)', borderRadius:'50%', background:'#fff', color:'#A3487C', fontSize:12, cursor:'pointer'}}>×</button>
+                          </div>)}
+                        </div>
+                      </div>}
                       {selectedResult?.logoDataUrl && <div className="logo-controls">
                         <div className="logo-file-row"><div className="logo-file-preview"><img src={selectedResult.logoDataUrl} alt="Uploaded logo preview"/></div><div style={{minWidth:0, flex:1}}><div style={{fontSize:11.5, fontWeight:700, color:'var(--ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{selectedResult.logoName || 'Uploaded logo'}</div><div style={{fontSize:10.5, color:'var(--muted)', marginTop:2}}>Transparent image · live preview</div></div><button type="button" className="btn btn-ghost" style={{padding:'5px 8px', fontSize:10.5}} onClick={clearLogo}>Remove</button></div>
                         <div className="logo-control-grid"><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}>Position</span><select className="select" value={selectedResult.logoPosition || 'top-right'} onChange={(e)=>patchSelectedResult({logoPosition:e.target.value})}><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}><span>Size</span><span className="hint">{Math.round((Number(selectedResult.logoScale) || 0.18) * 100)}%</span></span><input type="range" min="0.08" max="0.42" step="0.01" value={selectedResult.logoScale || 0.18} onChange={(e)=>patchSelectedResult({logoScale:Number(e.target.value)})}/></label><label className="field" style={{margin:0}}><span className="field-lbl" style={{marginBottom:4}}><span>Opacity</span><span className="hint">{Math.round((Number(selectedResult.logoOpacity) || 1) * 100)}%</span></span><input type="range" min="0.2" max="1" step="0.05" value={selectedResult.logoOpacity ?? 1} onChange={(e)=>patchSelectedResult({logoOpacity:Number(e.target.value)})}/></label></div>
