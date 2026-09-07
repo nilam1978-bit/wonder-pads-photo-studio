@@ -113,9 +113,10 @@
       armHeartbeat(job);
       jobs.set(id, job);
       const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
-      // Store outputs slightly above the 1400px studio export size. This keeps
-      // visible detail while preventing a long mobile batch from exhausting RAM.
-      const maxDimension = mobile ? 1800 : 2800;
+      // Phase 1 kept the full camera resolution, which looked crisp but could
+      // exhaust mobile Safari during a batch. Keep a higher 2400px mobile
+      // master, then create lighter 1400px previews separately.
+      const maxDimension = mobile ? 2400 : 3200;
       worker.postMessage({ type: 'remove', id, src, maxDimension });
     });
   }
@@ -148,6 +149,8 @@
     cleanCanvas.width = rawImg.width;
     cleanCanvas.height = rawImg.height;
     const cleanCtx = cleanCanvas.getContext('2d', { willReadFrequently: true });
+    cleanCtx.imageSmoothingEnabled = true;
+    cleanCtx.imageSmoothingQuality = 'high';
     cleanCtx.drawImage(rawImg, 0, 0);
     const cleanData = cleanCtx.getImageData(0, 0, cleanCanvas.width, cleanCanvas.height);
     for (let i = 3; i < cleanData.data.length; i += 4) {
@@ -163,6 +166,8 @@
     const canvas = document.createElement('canvas');
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     paintBackdrop(ctx, backdrop, Math.max(cw, ch), cw, ch);
 
