@@ -10,7 +10,14 @@ async function loadModel() {
   loading = (async () => {
     emit('progress', { key: 'loading library', percent: 3 });
     mod = await import(TRANSFORMERS_URL);
-    if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
+    if (mod.env) {
+      mod.env.allowLocalModels = false;
+      mod.env.useBrowserCache = true;
+      // Keep model downloads on this website. The Cloudflare Worker forwards
+      // /hf-proxy/... to Hugging Face server-side, avoiding the browser CORS
+      // failure that otherwise causes every queued photo to show "Failed".
+      mod.env.remoteHost = `${self.location.origin}/hf-proxy`;
+    }
     emit('progress', { key: 'loading model', percent: 8 });
     let lastErr = null;
     for (const dtype of DTYPE_FALLBACKS) {
