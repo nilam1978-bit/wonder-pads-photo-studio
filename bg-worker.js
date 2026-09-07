@@ -88,6 +88,8 @@ async function removeBg(src, id, maxDimension = 0) {
     const outHeight = Math.max(1, Math.round(orig.height * scale));
     const outCanvas = new OffscreenCanvas(outWidth, outHeight);
     const octx = outCanvas.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = 'high';
     octx.drawImage(orig, 0, 0, outWidth, outHeight);
     octx.globalCompositeOperation = 'destination-in';
     octx.drawImage(maskCanvas, 0, 0, outWidth, outHeight);
