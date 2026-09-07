@@ -61,8 +61,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     padding: Number(studioSettings.padding) || 0.10,
     fitApplied: true,
     shadowEnabled: studioSettings.shadowEnabled !== false,
-    shadowStrength: Number(studioSettings.shadowStrength) || 0.20,
-    shadowSoftness: Number(studioSettings.shadowSoftness) || 0.018,
+    shadowStrength: Number(studioSettings.shadowStrength) || 0.26,
+    shadowSoftness: Number(studioSettings.shadowSoftness) || 0.012,
     labelText: studioSettings.labelText || '',
     labelPosition: studioSettings.labelPosition || 'bottom-left',
     labelSize: studioSettings.labelSize || 'medium',
@@ -78,9 +78,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   });
   const shadowOptionsFor = (result) => ({
     dropShadow: result?.shadowEnabled !== false,
-    shadowOpacity: Number(result?.shadowStrength) || 0.20,
-    shadowSoftness: Number(result?.shadowSoftness) || 0.018,
-    shadowOffset: 0.012,
+    shadowOpacity: Number(result?.shadowStrength) || 0.26,
+    shadowSoftness: Number(result?.shadowSoftness) || 0.012,
+    shadowOffset: 0.016,
   });
 
   const applyStudioPreset = (id) => {
@@ -550,8 +550,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       padding: Number(selectedResult.padding) || 0.10,
       fitApplied: selectedResult.fitApplied !== false,
       shadowEnabled: selectedResult.shadowEnabled !== false,
-      shadowStrength: Number(selectedResult.shadowStrength) || 0.20,
-      shadowSoftness: Number(selectedResult.shadowSoftness) || 0.018,
+      shadowStrength: Number(selectedResult.shadowStrength) || 0.26,
+      shadowSoftness: Number(selectedResult.shadowSoftness) || 0.012,
       labelText: selectedResult.labelText || '',
       labelPosition: selectedResult.labelPosition || 'bottom-left',
       labelSize: selectedResult.labelSize || 'medium',
@@ -570,7 +570,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     setSaveNotice(`Applying this look to ${targets.length} photo${targets.length === 1 ? '' : 's'}…`);
     let completed = 0;
     for (const target of targets) {
-      const pending = resultDefaults({ ...look, status:'pending', src:'' });
+      const appliedAt = Date.now();
+      const pending = resultDefaults({ ...look, status:'pending', src:'', batchApplied:true, batchAppliedAt:appliedAt });
       patchItem(target.id, item => ({
         ...item,
         ratio: look.ratio,
@@ -585,10 +586,10 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
           zoom: look.zoom,
           ...shadowOptionsFor(look),
         });
-        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'ok', src })] }));
+        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'ok', src, batchApplied:true, batchAppliedAt:appliedAt })] }));
         completed += 1;
       } catch (error) {
-        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'error', error:error?.message || String(error), src:'' })] }));
+        patchItem(target.id, item => ({ ...item, results:[resultDefaults({ ...look, status:'error', error:error?.message || String(error), src:'', batchApplied:true, batchAppliedAt:appliedAt })] }));
       }
     }
     setSaveNotice(`Look applied to ${completed} of ${targets.length} selected photo${targets.length === 1 ? '' : 's'}`);
@@ -802,6 +803,14 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     if (!shot || !items.some(item => item.id === shot.itemId)) return;
     setActiveId(shot.itemId);
     setSelectedResultIdx(shot.resultIndex || 0);
+    setShowStudioModal(true);
+  };
+
+  const batchResults = useMemo(() => items.flatMap(item => (item.results || []).map((result, resultIndex) => ({ item, result, resultIndex })).filter(entry => entry.result.batchApplied && entry.result.status === 'ok')).sort((a, b) => (b.result.batchAppliedAt || 0) - (a.result.batchAppliedAt || 0)), [items]);
+
+  const reopenBatchResult = (entry) => {
+    setActiveId(entry.item.id);
+    setSelectedResultIdx(entry.resultIndex);
     setShowStudioModal(true);
   };
 
@@ -1202,6 +1211,34 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         )}
       </div>
 
+      {batchResults.length > 0 && (
+        <div className="card card-pad saved-gallery-card" aria-label="Batch results">
+          <div className="row between saved-gallery-head">
+            <div>
+              <div className="serif" style={{fontSize:22}}>Batch results</div>
+              <div className="saved-gallery-note">Pictures created by Apply this to batch. Open one to adjust it individually, or download it now.</div>
+            </div>
+            <span className="pill pill-blush"><Icon name="copy" className="ico-sm"/> {batchResults.length} applied</span>
+          </div>
+          <div className="saved-gallery-grid">
+            {batchResults.map(entry => {
+              const backdrop = BACKDROPS.find(item => item.id === entry.result.backdropId);
+              return <div className="saved-shot-card" key={`batch:${entry.item.id}:${entry.resultIndex}`}>
+                <div className="saved-shot-preview"><img src={entry.result.src} alt={`${entry.item.name} batch result`}/><span className="saved-shot-badge"><Icon name="copy" className="ico-sm"/> Batch</span></div>
+                <div className="saved-shot-meta">
+                  <div className="saved-shot-name" title={entry.item.name}>{entry.item.name}</div>
+                  <div className="saved-shot-details">{backdrop?.name || 'Studio shot'} · {entry.result.ratio || entry.item.ratio}</div>
+                  <div className="saved-shot-actions">
+                    <button type="button" className="btn btn-ghost" onClick={()=>reopenBatchResult(entry)}><Icon name="edit" className="ico-sm"/> Open refine</button>
+                    <button type="button" className="btn btn-blush" onClick={()=>downloadFinishedShot(entry.result, entry.item, exportFormat)}><Icon name="download" className="ico-sm"/> Download</button>
+                  </div>
+                </div>
+              </div>;
+            })}
+          </div>
+        </div>
+      )}
+
       {savedShots.length > 0 && (
         <div className="card card-pad saved-gallery-card" aria-label="Saved gallery">
           <div className="row between saved-gallery-head">
@@ -1447,8 +1484,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                     {refineTool === 'shadow' && <div className="refine-tool-panel">
                       <div className="fit-tool">
                         <div className="fit-tool-head"><div><div className="serif" style={{fontSize:17}}>Natural contact shadow</div><div className="fit-tool-note">A soft shadow anchors the pad to the surface. It is hidden on transparent exports.</div></div><label className="row" style={{gap:6, fontSize:11, fontWeight:700}}><input type="checkbox" checked={selectedResult?.shadowEnabled !== false} onChange={(e)=>updateSelectedShadow({shadowEnabled:e.target.checked})}/> On</label></div>
-                        <label className="fit-zoom-row"><span className="refine-mini-label">Strength</span><input type="range" min="0.08" max="0.38" step="0.01" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowStrength) || 0.20} onChange={(e)=>updateSelectedShadow({shadowStrength:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowStrength) || 0.20)*100)}%</span></label>
-                        <label className="fit-zoom-row"><span className="refine-mini-label">Softness</span><input type="range" min="0.008" max="0.035" step="0.001" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowSoftness) || 0.018} onChange={(e)=>updateSelectedShadow({shadowSoftness:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowSoftness) || 0.018)*1000)}</span></label>
+                        <label className="fit-zoom-row"><span className="refine-mini-label">Strength</span><input type="range" min="0.10" max="0.45" step="0.01" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowStrength) || 0.26} onChange={(e)=>updateSelectedShadow({shadowStrength:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowStrength) || 0.26)*100)}%</span></label>
+                        <label className="fit-zoom-row"><span className="refine-mini-label">Softness</span><input type="range" min="0.005" max="0.028" step="0.001" disabled={selectedResult?.shadowEnabled === false} value={Number(selectedResult?.shadowSoftness) || 0.012} onChange={(e)=>updateSelectedShadow({shadowSoftness:Number(e.target.value)})}/><span className="zoom-value">{Math.round((Number(selectedResult?.shadowSoftness) || 0.012)*1000)}</span></label>
                       </div>
                     </div>}
                     {refineTool === 'branding' && <div className="refine-tool-panel">
