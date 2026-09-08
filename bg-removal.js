@@ -99,7 +99,7 @@
 
   function preload() { try { ensureWorker(); } catch (e) { console.warn('preload:', e); } }
 
-  async function removeBackground(src) {
+  async function removeBackground(src, options = {}) {
     ensureWorker();
     const id = ++jobSeq;
     return new Promise((resolve, reject) => {
@@ -113,10 +113,11 @@
       armHeartbeat(job);
       jobs.set(id, job);
       const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
-      // Phase 1 kept the full camera resolution, which looked crisp but could
-      // exhaust mobile Safari during a batch. Keep a higher 2400px mobile
-      // master, then create lighter 1400px previews separately.
-      const maxDimension = mobile ? 2400 : 3200;
+      // A single phone photo can safely keep a larger working master. During
+      // multi-upload, each completed cutout remains in the gallery, so use the
+      // proven 1800px ceiling to stop Safari exhausting its memory.
+      const requested = Number(options.maxDimension) || 0;
+      const maxDimension = requested > 0 ? requested : mobile ? (options.batch ? 1800 : 2400) : 3200;
       worker.postMessage({ type: 'remove', id, src, maxDimension });
     });
   }
