@@ -136,7 +136,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   // Sequential job queue for BG removal (worker is single-threaded per model instance)
   const queueRef = useRef(Promise.resolve());
-  const enqueueBgRemoval = (id, fallbackItem = null) => {
+  const enqueueBgRemoval = (id, fallbackItem = null, batchMode = false) => {
     queueRef.current = queueRef.current.then(async () => {
       // Use the synchronized ref rather than reading state through an updater
       // and immediately consuming the not-yet-assigned local variable.
@@ -146,7 +146,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       currentJobItemId.current = id;
       patchItem(id, { bgProgress: { key:'queued', percent:0 }, bgError: null });
       try {
-        const transparent = await window.WPBGRemoval.removeBackground(cur.manualSrc || cur.src);
+        const transparent = await window.WPBGRemoval.removeBackground(cur.manualSrc || cur.src, { batch:batchMode || cur.batchUpload === true });
         patchItem(id, { cutout: transparent, bgProgress: { key:'done', percent:100 }, cutoutMethod:'bg-remove' });
       } catch (e) {
         patchItem(id, { bgError: e.message || String(e), bgProgress: null });
@@ -175,6 +175,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         name: f.name,
         src,
         sourceObjectUrl: true,
+        batchUpload: files.length > 1,
         w: dim.w, h: dim.h,
         manualSrc: null,
         previewDraft: resultDefaults({ status:'ok', src, backdropId:presetBackdropIds[0], ratio:presetRatio }),
@@ -198,7 +199,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     // run after this handler returns.
     itemsRef.current = [...itemsRef.current, ...prepared];
     // Start the sequential background-removal queue automatically after the batch is in the synchronized ref.
-    prepared.forEach(item => enqueueBgRemoval(item.id, item));
+    prepared.forEach(item => enqueueBgRemoval(item.id, item, files.length > 1));
   };
 
   const useSample = async () => {
@@ -782,13 +783,29 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       const backdrop = BACKDROPS.find(entry => entry.id === result.backdropId);
       if (backdrop) {
         const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900);
-        baseSrc = await window.WPBGRemoval.composite(item.cutout, backdrop.spec, {
-          ratio:result.ratio || item.ratio || '1:1',
-          longEdge:mobile ? 2400 : 2800,
-          padding:Number(result.padding) || 0.10,
-          zoom:Number(result.zoom) || 1,
-          ...shadowOptionsFor(result),
-        });
+        let exportCutout = item.cutout;
+        let temporaryCutout = '';
+        // Multi-upload uses a smaller working cutout for stability. Re-run only
+        // this photo at export time so its saved file gets true 2400px detail.
+        // Keep an edited cutout as-is so manual Restore/Erase work is preserved.
+        const removalQueueBusy = itemsRef.current.some(photo => ['queued','processing'].includes(photo.bgProgress?.key));
+        if (mobile && item.batchUpload && !item.cutoutEdited && !removalQueueBusy && (item.manualSrc || item.src)) {
+          try {
+            temporaryCutout = await window.WPBGRemoval.removeBackground(item.manualSrc || item.src, { maxDimension:2400 });
+            if (temporaryCutout) exportCutout = temporaryCutout;
+          } catch (_) {}
+        }
+        try {
+          baseSrc = await window.WPBGRemoval.composite(exportCutout, backdrop.spec, {
+            ratio:result.ratio || item.ratio || '1:1',
+            longEdge:mobile ? 2400 : 2800,
+            padding:Number(result.padding) || 0.10,
+            zoom:Number(result.zoom) || 1,
+            ...shadowOptionsFor(result),
+          });
+        } finally {
+          if (temporaryCutout?.startsWith?.('blob:')) URL.revokeObjectURL(temporaryCutout);
+        }
       }
     }
     const image = await new Promise((resolve, reject) => {
@@ -1136,7 +1153,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
           original={activeItem.src}
           cutout={activeItem.cutout || activeItem.manualSrc || activeItem.src}
           onSave={(newSrc)=>{
-            patchItem(activeItem.id, activeItem.cutout ? { cutout: newSrc, results: null } : { manualSrc: newSrc });
+            patchItem(activeItem.id, activeItem.cutout ? { cutout:newSrc, cutoutEdited:true, results:null } : { manualSrc:newSrc });
             setShowEditor(false);
           }}
           onClose={()=>setShowEditor(false)}
