@@ -1025,7 +1025,20 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       detail:shot.backdropName,
       kind:'Saved',
     }));
-    return [...finalizedShots, ...workingShots];
+    // Every uploaded photo exactly as it came off the camera roll — no
+    // background removal, no studio generation, no editing required. This
+    // is what lets a plain upload go straight into a collage. Listed last
+    // so a photo you've already finished still gets picked first by default.
+    const originalShots = items
+      .filter(item => item.manualSrc || item.src)
+      .map(item => ({
+        key:`original:${item.id}`,
+        source:item.manualSrc || item.src,
+        name:item.name,
+        detail:'As uploaded',
+        kind:'Original',
+      }));
+    return [...finalizedShots, ...workingShots, ...originalShots];
   }, [items, savedShots]);
 
   const openCollageModal = () => {
@@ -1219,7 +1232,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
               </>
             )}
             {items.length > 0 && (
-              <button type="button" className="btn btn-blush collage-launch-btn" disabled={collageCandidates.length < 2} onClick={openCollageModal} title={collageCandidates.length < 2 ? 'Generate at least two studio shots first' : 'Create a collage from generated or saved shots'}>
+              <button type="button" className="btn btn-blush collage-launch-btn" disabled={collageCandidates.length < 2} onClick={openCollageModal} title={collageCandidates.length < 2 ? 'Upload at least two photos first' : 'Create a collage from uploaded, generated or saved photos'}>
                 <Icon name="grid" className="ico-sm"/> Collage{collageCandidates.length > 0 ? ` · ${Math.min(collageCandidates.length, 4)}` : ''}
               </button>
             )}
@@ -1471,7 +1484,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
               <div>
                 <div className="eyebrow">Gallery composition</div>
                 <div className="serif collage-modal-title">Create a collage</div>
-                <div className="collage-modal-sub">Arrange generated or saved studio shots into one blush-pink presentation image.</div>
+                <div className="collage-modal-sub">Arrange uploaded, generated or saved photos into one presentation image. Nothing is cropped.</div>
               </div>
               <div className="row" style={{gap:8}}>
                 <span className="pill pill-linen">{collageSources.length} of {collageCapacity} selected</span>
@@ -1491,11 +1504,11 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                   <div className="serif" style={{fontSize:20}}>Collage settings</div>
                   {collageNotice && <span className="save-notice" role="status">{collageNotice}</span>}
                 </div>
-                <div className="collage-control-note">Choose up to {collageCapacity} images from the available generated and Saved gallery shots.</div>
+                <div className="collage-control-note">Choose up to {collageCapacity} images. Plain uploads work here too — an "Original" is the photo exactly as you uploaded it, with no editing needed.</div>
 
                 <div className="refine-section-label">Images</div>
                 <div className="collage-source-list">
-                  {collageCandidates.length === 0 && <div className="collage-source-empty">Generate or save studio shots first.</div>}
+                  {collageCandidates.length === 0 && <div className="collage-source-empty">Upload a photo first, then come back here.</div>}
                   {collageCandidates.map(candidate => {
                     const selected = collageSources.some(source => source.key === candidate.key);
                     return <button type="button" key={candidate.key} className={'collage-source'+(selected ? ' selected' : '')} onClick={()=>toggleCollageSource(candidate)} aria-pressed={selected}>
