@@ -33,12 +33,60 @@
     { id: 'black', label: 'Black', color: '#1E1A1D' },
   ];
 
+  // The four pieces of a circle. "tl" = the TOP-LEFT piece, whose round edge faces top-left.
+  const CORNERS = [
+    { id: 'tl', label: 'Top-left piece', path: 'M24 24 L0 24 A24 24 0 0 1 24 0 Z' },
+    { id: 'tr', label: 'Top-right piece', path: 'M0 24 L24 24 A24 24 0 0 0 0 0 Z' },
+    { id: 'bl', label: 'Bottom-left piece', path: 'M24 0 L0 0 A24 24 0 0 0 24 24 Z' },
+    { id: 'br', label: 'Bottom-right piece', path: 'M0 0 L24 0 A24 24 0 0 1 0 24 Z' },
+  ];
   const MAX_SIDE = 6000;
   const MAX_PIXELS = 16000000; // keeps phones/iPads from running out of canvas memory
   const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 6;
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  // ---------- quarter-circle shape ----------
+  // Photos with a see-through shape or background can't be saved as JPG.
+  const isShaped = (it) => it.ratioId === 'quarter' || it.fillType === 'none';
+
+  // Where the full circle's centre sits for each piece (0 or 1 across the square canvas).
+  function circleCentre(corner) {
+    return ({ tl: [1, 1], tr: [0, 1], bl: [1, 0], br: [0, 0] })[corner] || [1, 1];
+  }
+
+  // Keeps only the quarter-circle and makes everything else see-through.
+  function maskQuarter(ctx, S, corner) {
+    const [fx, fy] = circleCentre(corner);
+    const start = ({ tl: Math.PI, tr: Math.PI * 1.5, bl: Math.PI * 0.5, br: 0 })[corner];
+    const a0 = start === undefined ? Math.PI : start;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.moveTo(fx * S, fy * S);
+    ctx.arc(fx * S, fy * S, S, a0, a0 + Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // The "whole photo" starting position. For a normal size that is simply "fits the canvas".
+  // For a quarter circle the photo is tucked into the straight corner and sized so its far
+  // corner just touches the curve — so the full photo stays visible inside the quarter.
+  function fitViewFor(it) {
+    if (it.ratioId !== 'quarter') return { zoom: 1, offX: 0, offY: 0 };
+    const a = it.iw / it.ih;
+    const k = 0.97; // tiny breathing room from the curve
+    const w = (a / Math.sqrt(a * a + 1)) * k; // photo width as a fraction of the square
+    const h = (1 / Math.sqrt(a * a + 1)) * k;
+    const [fx, fy] = circleCentre(it.quarterCorner);
+    const rcx = fx ? 1 - w / 2 : w / 2;
+    const rcy = fy ? 1 - h / 2 : h / 2;
+    const zoom = (w / it.iw) / Math.min(1 / it.iw, 1 / it.ih);
+    return { zoom, offX: rcx - 0.5, offY: rcy - 0.5 };
+  }
 
   // ---------- sizing ----------
   function outDims(it) {
@@ -51,7 +99,10 @@
       const longEdge = it.long === 'orig' ? Math.max(it.iw, it.ih) : Number(it.long) || 1400;
       let rw = it.iw;
       let rh = it.ih;
-      if (it.ratioId !== 'photo') {
+      if (it.ratioId === 'quarter') {
+        rw = 1;
+        rh = 1;
+      } else if (it.ratioId !== 'photo') {
         const r = getRatios().find((x) => x.id === it.ratioId);
         if (r) { rw = r.ratio[0]; rh = r.ratio[1]; }
       }
@@ -117,6 +168,8 @@
     ctx.clearRect(0, 0, W, H);
     if (s.fillType === 'blur') {
       drawBlurFill(ctx, img, iw, ih, W, H);
+    } else if (s.fillType === 'none') {
+      // transparent: leave the canvas empty behind the photo
     } else {
       ctx.fillStyle = s.fillColor || '#FFFFFF';
       ctx.fillRect(0, 0, W, H);
@@ -130,6 +183,7 @@
     ctx.imageSmoothingQuality = 'high';
     const source = hq && sc < 0.5 ? stepDown(img, iw, ih, dw) : img;
     ctx.drawImage(source, cx - dw / 2, cy - dh / 2, dw, dh);
+    if (s.ratioId === 'quarter') maskQuarter(ctx, W, s.quarterCorner);
   }
 
   async function renderToBlob(it, fmt, quality) {
@@ -138,7 +192,8 @@
     c.width = w;
     c.height = h;
     drawComposite(c.getContext('2d'), it.el, it.iw, it.ih, w, h, it, true);
-    const mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
+    let mime = fmt === 'png' ? 'image/png' : fmt === 'webp' ? 'image/webp' : 'image/jpeg';
+    if (mime === 'image/jpeg' && isShaped(it)) mime = 'image/png'; // JPG cannot be see-through
     const blob = await new Promise((res) => c.toBlob(res, mime, quality));
     if (!blob) throw new Error('This browser could not create the image.');
     return { blob, w, h };
@@ -213,6 +268,13 @@
   .rs-swatches{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .rs-swatch{ width:30px; height:30px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); cursor:pointer; padding:0; }
   .rs-swatch.on{ box-shadow:0 0 0 2px var(--rose); }
+  .rs-swatch.none{ background:conic-gradient(#d8d2d6 25%, #fff 0 50%, #d8d2d6 0 75%, #fff 0) 0 0/10px 10px; }
+  .rs-canvas--alpha{ background:transparent; box-shadow:none; }
+  .rs-corners{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .rs-corner{ display:flex; align-items:center; gap:7px; padding:7px 9px; border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:11.5px; font-weight:600; cursor:pointer; text-align:left; }
+  .rs-corner.on{ background:linear-gradient(180deg,#F7E6F1 0%,#F1CFEA 100%); border-color:rgba(196,122,184,.35); color:#5B2F52; }
+  .rs-corner svg{ flex:0 0 auto; }
+  .rs-note{ margin-top:8px; font-size:11.5px; line-height:1.4; color:var(--muted); }
   .rs-swatch.blur{ background:linear-gradient(135deg,#F3D4EB,#D9E2D2,#F5EBDD); }
   .rs-color-input{ width:34px; height:30px; padding:0; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; }
   .rs-select, .rs-num{ box-sizing:border-box; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:13px; color:var(--ink); }
@@ -379,6 +441,16 @@
             const dy = startY + r * (tileH + gap) + (tileH - dh) / 2;
             const radius = Math.min(14, Math.min(dw, dh) * 0.04);
 
+            if (isShaped(it)) {
+              // see-through shapes (quarter circles) sit directly on the backdrop — no card behind them
+              ctx.save();
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(pc, dx, dy, dw, dh);
+              ctx.restore();
+              continue;
+            }
+
             ctx.save();
             ctx.shadowColor = bd.dark ? 'rgba(0,0,0,.5)' : 'rgba(90,50,80,.2)';
             ctx.shadowBlur = 22;
@@ -527,7 +599,7 @@
       for (const f of files) {
         try {
           const p = await loadPhoto(f);
-          added.push({
+          const fresh = {
             id: `rs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             name: f.name,
             ...p,
@@ -537,10 +609,13 @@
             chS: base ? base.chS : '1080',
             fillType: base ? base.fillType : 'color',
             fillColor: base ? base.fillColor : '#FFFFFF',
+            quarterCorner: CORNERS[(itemsRef.current.length + added.length) % 4].id,
             zoom: 1,
             offX: 0,
             offY: 0,
-          });
+          };
+          Object.assign(fresh, fitViewFor(fresh));
+          added.push(fresh);
         } catch (e) { failed += 1; }
       }
       if (added.length) {
@@ -575,9 +650,12 @@
     // Size / background changes go to every photo when "same for all" is on.
     // Zoom and position stay per-photo, but are reset to "whole photo fits" because the canvas shape changed.
     const applyShared = (changes, resetView) => {
-      setItems((prev) => prev.map((i) => {
+      setItems((prev) => prev.map((i, idx) => {
         if (!sameForAll && i.id !== activeIdRef.current) return i;
-        return { ...i, ...changes, ...(resetView ? { zoom: 1, offX: 0, offY: 0 } : {}) };
+        const merged = { ...i, ...changes };
+        // choosing Quarter circle for several photos hands out the four pieces in order
+        if (changes.ratioId === 'quarter') merged.quarterCorner = CORNERS[idx % 4].id;
+        return resetView ? { ...merged, ...fitViewFor(merged) } : merged;
       }));
     };
 
@@ -597,7 +675,8 @@
       zoomAt(nz / active.zoom, 0, 0);
     };
 
-    const fitWhole = () => patchActive({ zoom: 1, offX: 0, offY: 0 });
+    const fitWhole = () => { if (active) patchActive(fitViewFor(active)); };
+    const setCorner = (id) => { if (active) patchActive({ quarterCorner: id, ...fitViewFor({ ...active, quarterCorner: id }) }); };
     const fillFrame = () => {
       if (!active) return;
       const { w, h } = outDims(active);
@@ -791,7 +870,7 @@
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}>
               <div className="rs-stage">
-                <canvas ref={canvasRef} className="rs-canvas" aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."
+                <canvas ref={canvasRef} className={'rs-canvas' + (isShaped(active) ? ' rs-canvas--alpha' : '')} aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."
                   onPointerDown={onPointerDown} onPointerMove={onPointerMove}
                   onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}/>
               </div>
@@ -834,7 +913,24 @@
               ))}
               <button type="button" className={'chip' + (active.ratioId === 'custom' ? ' on' : '')}
                 onClick={() => applyShared({ ratioId: 'custom' }, true)}>Custom size</button>
+              <button type="button" className={'chip' + (active.ratioId === 'quarter' ? ' on' : '')}
+                onClick={() => applyShared({ ratioId: 'quarter' }, true)}>¼ Quarter circle</button>
             </div>
+
+            {active.ratioId === 'quarter' && (
+              <>
+                <div className="rs-lbl">Which piece is this photo? <span className="hint">this photo only</span></div>
+                <div className="rs-corners">
+                  {CORNERS.map((c) => (
+                    <button key={c.id} type="button" className={'rs-corner' + (active.quarterCorner === c.id ? ' on' : '')} onClick={() => setCorner(c.id)}>
+                      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={c.path} fill="currentColor"/></svg>
+                      <span>{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="rs-note">Each piece saves as a see-through PNG square. Put the four squares together in a 2 × 2 to make the full circle (e.g. in Canva).</div>
+              </>
+            )}
 
             {active.ratioId === 'custom' ? (
               <div className="rs-custom">
@@ -864,6 +960,9 @@
               <button type="button" className={'rs-swatch blur' + (active.fillType === 'blur' ? ' on' : '')}
                 title="Blurred copy of the photo" aria-label="Blurred copy of the photo"
                 onClick={() => applyShared({ fillType: 'blur' }, false)}/>
+              <button type="button" className={'rs-swatch none' + (active.fillType === 'none' ? ' on' : '')}
+                title="Transparent (saves as PNG)" aria-label="Transparent"
+                onClick={() => applyShared({ fillType: 'none' }, false)}/>
               <input className="rs-color-input" type="color" aria-label="Pick any colour" value={/^#[0-9a-f]{6}$/i.test(active.fillColor) ? active.fillColor : '#ffffff'}
                 onChange={(e) => applyShared({ fillType: 'color', fillColor: e.target.value }, false)}/>
             </div>
@@ -879,6 +978,7 @@
                 <button key={id} type="button" className={'chip' + (fmt === id ? ' on' : '')} onClick={() => setFmt(id)}>{label}</button>
               ))}
             </div>
+            {isShaped(active) && fmt === 'jpeg' && <div className="rs-note">This photo has see-through areas, so it will save as PNG.</div>}
             {fmt !== 'png' && (
               <div className="rs-zoom-row">
                 <span className="rs-zoom-val" style={{ textAlign: 'left', minWidth: 52 }}>Quality</span>
