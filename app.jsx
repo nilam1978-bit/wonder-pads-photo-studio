@@ -253,6 +253,7 @@ const App = () => {
       { id:'builder', name:'Presets', icon:'template' },
       { id:'generator', name:'Production', icon:'sparkles' },
       { id:'fabric-prep', name:'Compress', icon:'scissors' },
+      { id:'resize', name:'Resize', icon:'layout' },
       { id:'silhouette', name:'Silhouette Studio', icon:'template' },
     ]},
   ];
@@ -262,6 +263,7 @@ const App = () => {
     : screen === 'gallery' ? 'Saved Gallery'
     : screen === 'home' ? 'Overview'
     : screen === 'silhouette' ? 'Silhouette Studio'
+    : screen === 'resize' ? 'Resize Studio'
     : 'Production';
 
   return (
@@ -333,6 +335,7 @@ const App = () => {
         {screen==='generator' && <ProductionGenerator initialPresetId={handoffPresetId} onGoto={goto}/>} 
         {screen==='fabric-prep' && <FabricPrep onGoto={goto} initialFabricId={handoffFabricId}/>} 
         {screen==='silhouette' && window.SilhouetteStudioPage && React.createElement(window.SilhouetteStudioPage,{item:handoffSilhouette,onGoto:goto})} 
+        {screen==='resize' && window.ResizeStudioPage && React.createElement(window.ResizeStudioPage)} 
         {screen==='gallery' && <SavedGallery onGoto={goto}/>} 
       </main>
     </div>
