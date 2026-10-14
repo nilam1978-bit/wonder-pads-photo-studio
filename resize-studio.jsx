@@ -269,6 +269,17 @@
   .rs-swatch{ width:30px; height:30px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); cursor:pointer; padding:0; }
   .rs-swatch.on{ box-shadow:0 0 0 2px var(--rose); }
   .rs-swatch.none{ background:conic-gradient(#d8d2d6 25%, #fff 0 50%, #d8d2d6 0 75%, #fff 0) 0 0/10px 10px; }
+  .rs-canvas--pick, .rs-canvas--pick:active{ cursor:crosshair; outline:3px solid var(--rose); outline-offset:3px; }
+  .rs-colorrow{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  .rs-custom-colour{ position:relative; display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 7px; border-radius:999px; border:1px solid var(--line); background:#fff; font-size:12px; font-weight:700; color:var(--ink-soft); cursor:pointer; overflow:hidden; }
+  .rs-custom-colour.on{ border-color:rgba(196,122,184,.5); background:linear-gradient(180deg,#F7E6F1 0%,#F1CFEA 100%); color:#5B2F52; }
+  .rs-rainbow{ width:22px; height:22px; border-radius:50%; background:conic-gradient(#ff6b6b,#ffd93d,#6bcb77,#4d96ff,#c77dff,#ff6b6b); box-shadow:0 0 0 1px rgba(0,0,0,.12); flex:0 0 auto; }
+  .rs-color-hidden{ position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; border:0; padding:0; }
+  .rs-hex{ box-sizing:border-box; width:92px; padding:7px 9px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:12.5px; font-weight:700; letter-spacing:.04em; color:var(--ink); text-transform:uppercase; }
+  .rs-pickbtn{ padding:7px 13px; font-size:12px; }
+  .rs-pickbtn.on{ background:var(--blush-soft); border-color:var(--rose); }
+  .rs-recent{ display:flex; align-items:center; gap:7px; margin-top:10px; font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.1em; }
+  .rs-swatch.sm{ width:22px; height:22px; }
   .rs-canvas--alpha{ background:transparent; box-shadow:none; }
   .rs-corners{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
   .rs-corner{ display:flex; align-items:center; gap:7px; padding:7px 9px; border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:11.5px; font-weight:600; cursor:pointer; text-align:left; }
@@ -560,11 +571,40 @@
     );
   };
 
+  // Accepts "#fff", "FFF", "#F3D4EB" ... and returns "#f3d4eb", or null if it isn't a colour.
+  function normalizeHex(str) {
+    let t = String(str || '').trim().replace(/^#/, '');
+    if (/^[0-9a-f]{3}$/i.test(t)) t = t.split('').map((ch) => ch + ch).join('');
+    return /^[0-9a-f]{6}$/i.test(t) ? '#' + t.toLowerCase() : null;
+  }
+
+  // A small text box for typing a colour code like #F3D4EB.
+  const HexField = ({ value, onCommit }) => {
+    const [txt, setTxt] = useState(String(value || '').toUpperCase());
+    useEffect(() => { setTxt(String(value || '').toUpperCase()); }, [value]);
+    const commit = () => {
+      const h = normalizeHex(txt);
+      if (h) onCommit(h); else setTxt(String(value || '').toUpperCase());
+    };
+    return (
+      <input className="rs-hex" value={txt} maxLength={7} spellCheck={false} autoComplete="off" aria-label="Colour code" placeholder="#FFFFFF"
+        onChange={(e) => setTxt(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}/>
+    );
+  };
+
   const ResizeStudio = () => {
     const [items, setItems] = useState([]);
     const [activeId, setActiveId] = useState(null);
     const [sameForAll, setSameForAll] = useState(true);
     const [view, setView] = useState('resize');
+    const [picking, setPicking] = useState(false);
+    const [recent, setRecent] = useState(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('wp_resize_recent') || '[]');
+        return Array.isArray(saved) ? saved.filter((c) => normalizeHex(c)).slice(0, 6) : [];
+      } catch (e) { return []; }
+    });
     const [fmt, setFmt] = useState('jpeg');
     const [quality, setQuality] = useState(92);
     const [dragOver, setDragOver] = useState(false);
@@ -704,8 +744,42 @@
       return { x: (e.clientX - r.left) / r.width - 0.5, y: (e.clientY - r.top) / r.height - 0.5, rect: r };
     };
 
+    const rememberColor = (hex) => {
+      const h = normalizeHex(hex);
+      if (!h) return;
+      setRecent((prev) => {
+        const next = [h, ...prev.filter((c) => c !== h)].slice(0, 6);
+        try { localStorage.setItem('wp_resize_recent', JSON.stringify(next)); } catch (e) { /* storage unavailable: fine */ }
+        return next;
+      });
+    };
+
+    // "Pick from photo": copy the colour of whatever spot you tap in the preview.
+    const sampleAt = (e) => {
+      const c = canvasRef.current;
+      if (!c) return;
+      const r = c.getBoundingClientRect();
+      const x = clamp(Math.floor(((e.clientX - r.left) / r.width) * c.width), 0, c.width - 1);
+      const y = clamp(Math.floor(((e.clientY - r.top) / r.height) * c.height), 0, c.height - 1);
+      const d = c.getContext('2d').getImageData(x, y, 1, 1).data;
+      if (d[3] < 200) { say('That spot is see-through. Tap on the photo or a coloured area.', true); return; }
+      const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+      applyShared({ fillType: 'color', fillColor: hex }, false);
+      rememberColor(hex);
+      setPicking(false);
+      say(`Colour ${hex.toUpperCase()} applied.`);
+    };
+
+    useEffect(() => {
+      if (!picking) return undefined;
+      const onKey = (e) => { if (e.key === 'Escape') setPicking(false); };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, [picking]);
+
     const onPointerDown = (e) => {
       if (!active) return;
+      if (picking) { sampleAt(e); return; }
       canvasRef.current.setPointerCapture?.(e.pointerId);
       ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.current.size === 2) {
@@ -870,7 +944,7 @@
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}>
               <div className="rs-stage">
-                <canvas ref={canvasRef} className={'rs-canvas' + (isShaped(active) ? ' rs-canvas--alpha' : '')} aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."
+                <canvas ref={canvasRef} className={'rs-canvas' + (isShaped(active) ? ' rs-canvas--alpha' : '') + (picking ? ' rs-canvas--pick' : '')} aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."
                   onPointerDown={onPointerDown} onPointerMove={onPointerMove}
                   onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}/>
               </div>
@@ -963,9 +1037,32 @@
               <button type="button" className={'rs-swatch none' + (active.fillType === 'none' ? ' on' : '')}
                 title="Transparent (saves as PNG)" aria-label="Transparent"
                 onClick={() => applyShared({ fillType: 'none' }, false)}/>
-              <input className="rs-color-input" type="color" aria-label="Pick any colour" value={/^#[0-9a-f]{6}$/i.test(active.fillColor) ? active.fillColor : '#ffffff'}
-                onChange={(e) => applyShared({ fillType: 'color', fillColor: e.target.value }, false)}/>
             </div>
+
+            <div className="rs-colorrow">
+              <label className={'rs-custom-colour' + (active.fillType === 'color' && !FILLS.some((f) => f.color.toLowerCase() === String(active.fillColor).toLowerCase()) ? ' on' : '')} title="Choose any colour you like">
+                <span className="rs-rainbow" style={active.fillType === 'color' && !FILLS.some((f) => f.color.toLowerCase() === String(active.fillColor).toLowerCase()) ? { background: active.fillColor } : undefined}/>
+                <span>Custom colour</span>
+                <input type="color" className="rs-color-hidden" aria-label="Pick any colour" value={normalizeHex(active.fillColor) || '#ffffff'}
+                  onChange={(e) => applyShared({ fillType: 'color', fillColor: e.target.value }, false)}
+                  onBlur={(e) => rememberColor(e.target.value)}/>
+              </label>
+              <HexField value={normalizeHex(active.fillColor) || '#ffffff'} onCommit={(h) => { applyShared({ fillType: 'color', fillColor: h }, false); rememberColor(h); }}/>
+              <button type="button" className={'btn btn-ghost rs-pickbtn' + (picking ? ' on' : '')} onClick={() => setPicking((v) => !v)}>
+                {picking ? 'Cancel' : 'Pick from photo'}
+              </button>
+            </div>
+            {picking && <div className="rs-note"><strong>Tap anywhere on the photo preview</strong> to copy that colour into the empty space.</div>}
+            {recent.length > 0 && (
+              <div className="rs-recent">
+                <span>Recent</span>
+                {recent.map((c) => (
+                  <button key={c} type="button" className={'rs-swatch sm' + (active.fillType === 'color' && String(active.fillColor).toLowerCase() === c ? ' on' : '')}
+                    style={{ background: c }} title={c.toUpperCase()} aria-label={`Use ${c.toUpperCase()}`}
+                    onClick={() => applyShared({ fillType: 'color', fillColor: c }, false)}/>
+                ))}
+              </div>
+            )}
 
             <label className="rs-check">
               <input type="checkbox" checked={sameForAll} onChange={(e) => setSameForAll(e.target.checked)}/>
