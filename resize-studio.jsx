@@ -214,14 +214,63 @@
   }
 
   // ---------- loading a photo ----------
-  function loadPhoto(file) {
+  // A background-removed photo usually has a big empty see-through margin around the product.
+  // This finds the product's real edges and returns a cropped copy, so the product (not the
+  // empty margin) is what gets fitted into the shape. Returns null when there is nothing to trim.
+  function trimTransparent(src, iw, ih) {
+    const k = Math.min(1, 800 / Math.max(iw, ih));
+    const sw = Math.max(1, Math.round(iw * k));
+    const sh = Math.max(1, Math.round(ih * k));
+    const probe = document.createElement('canvas');
+    probe.width = sw;
+    probe.height = sh;
+    const pctx = probe.getContext('2d', { willReadFrequently: true });
+    pctx.drawImage(src, 0, 0, sw, sh);
+    let data;
+    try { data = pctx.getImageData(0, 0, sw, sh).data; } catch (e) { return null; }
+    let minX = sw;
+    let minY = sh;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < sh; y += 1) {
+      for (let x = 0; x < sw; x += 1) {
+        if (data[(y * sw + x) * 4 + 3] > 16) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return null; // fully see-through: leave it alone
+    const pad = 2;
+    const x0 = Math.max(0, Math.floor(minX / k) - pad);
+    const y0 = Math.max(0, Math.floor(minY / k) - pad);
+    const x1 = Math.min(iw, Math.ceil((maxX + 1) / k) + pad);
+    const y1 = Math.min(ih, Math.ceil((maxY + 1) / k) + pad);
+    const bw = x1 - x0;
+    const bh = y1 - y0;
+    if (bw < 4 || bh < 4 || (bw * bh) / (iw * ih) > 0.97) return null;
+    const out = document.createElement('canvas');
+    out.width = bw;
+    out.height = bh;
+    out.getContext('2d').drawImage(src, x0, y0, bw, bh, 0, 0, bw, bh);
+    return out;
+  }
+
+  function loadPhoto(file, opts) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
-      const el = new Image();
-      el.onload = () => {
-        const iw = el.naturalWidth;
-        const ih = el.naturalHeight;
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        let el = imgEl;
+        let iw = imgEl.naturalWidth;
+        let ih = imgEl.naturalHeight;
         if (!iw || !ih) { URL.revokeObjectURL(url); reject(new Error('empty')); return; }
+        if (opts && opts.trim) {
+          const trimmed = trimTransparent(imgEl, iw, ih);
+          if (trimmed) { el = trimmed; iw = trimmed.width; ih = trimmed.height; }
+        }
         // A lighter copy used only for the live preview, so dragging stays smooth.
         const k = Math.min(1, 1600 / Math.max(iw, ih));
         const proxy = document.createElement('canvas');
@@ -233,8 +282,8 @@
         px.drawImage(stepDown(el, iw, ih, proxy.width), 0, 0, proxy.width, proxy.height);
         resolve({ url, el, iw, ih, proxy });
       };
-      el.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
-      el.src = url;
+      imgEl.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
+      imgEl.src = url;
     });
   }
 
@@ -305,6 +354,8 @@
   .rs-thumb img{ width:100%; height:100%; object-fit:contain; display:block; }
   .rs-thumb .rs-x{ position:absolute; top:3px; right:3px; width:20px; height:20px; border-radius:50%; background:rgba(61,47,58,.78); color:#fff; font-size:12px; line-height:20px; text-align:center; }
   .rs-add{ flex:0 0 auto; width:86px; height:86px; border-radius:12px; border:2px dashed var(--blush-deep); background:#FFF8FC; color:var(--rose); font-size:26px; cursor:pointer; }
+  .rs-banner{ display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; margin:0 0 14px; border-radius:14px; border:1px solid rgba(196,122,184,.35); background:linear-gradient(145deg,#FFF8FC 0%,#F8EAF4 100%); font-size:13px; color:var(--ink-soft); line-height:1.45; }
+  .rs-banner strong{ color:var(--ink); }
   .rs-tabs{ display:flex; gap:8px; margin:0 0 16px; }
   .rs-tab{ padding:9px 18px; border-radius:999px; border:1px solid var(--line); background:#fff; font-weight:700; font-size:13px; color:var(--ink-soft); cursor:pointer; }
   .rs-tab.on{ background:linear-gradient(180deg,#F7E6F1 0%,#F1CFEA 100%); border-color:rgba(196,122,184,.35); color:#5B2F52; }
@@ -599,6 +650,7 @@
     const [sameForAll, setSameForAll] = useState(true);
     const [view, setView] = useState('resize');
     const [picking, setPicking] = useState(false);
+    const [banner, setBanner] = useState(0);
     const [recent, setRecent] = useState(() => {
       try {
         const saved = JSON.parse(localStorage.getItem('wp_resize_recent') || '[]');
@@ -629,16 +681,16 @@
     useEffect(() => () => { itemsRef.current.forEach((i) => URL.revokeObjectURL(i.url)); }, []);
 
     // ----- add photos -----
-    const addFiles = async (fileList) => {
+    const addFiles = async (fileList, opts) => {
       const files = Array.from(fileList || []).filter((f) => /^image\//.test(f.type)).slice(0, 50);
-      if (!files.length) { say('Please choose image files (JPG, PNG, WebP, HEIC…).', true); return; }
+      if (!files.length) { say('Please choose image files (JPG, PNG, WebP, HEIC…).', true); return 0; }
       say('Loading photos…');
       const base = itemsRef.current.find((i) => i.id === activeIdRef.current) || itemsRef.current[0] || null;
       const added = [];
       let failed = 0;
       for (const f of files) {
         try {
-          const p = await loadPhoto(f);
+          const p = await loadPhoto(f, opts);
           const fresh = {
             id: `rs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             name: f.name,
@@ -663,7 +715,18 @@
         setActiveId((cur) => cur || added[0].id);
       }
       say(failed ? `${added.length} added, ${failed} could not be read.` : `${added.length} photo${added.length === 1 ? '' : 's'} added.`, failed > 0 && !added.length);
+      return added.length;
     };
+
+    // Photos sent over from the Production screen (background already removed) arrive here.
+    useEffect(() => {
+      const inbox = window.__wpResizeInbox;
+      if (Array.isArray(inbox) && inbox.length) {
+        window.__wpResizeInbox = [];
+        addFiles(inbox, { trim: true }).then((n) => { if (n) setBanner(n); });
+      }
+    // eslint-disable-next-line
+    }, []);
 
     const removeItem = (id) => {
       const victim = itemsRef.current.find((i) => i.id === id);
@@ -932,6 +995,18 @@
         <style>{STYLES}</style>
         {heading}
         {fileInput}
+        {banner > 0 && view === 'resize' && (
+          <div className="rs-banner" role="status">
+            <div>
+              <strong>{banner} background-removed photo{banner === 1 ? '' : 's'} received from Production.</strong>
+              <span> The empty see-through edges were trimmed so your product fills the shape.</span>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary" onClick={() => { applyShared({ ratioId: 'quarter' }, true); setBanner(0); }}>Fit into ¼ circle pieces</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setBanner(0)}>Keep current size</button>
+            </div>
+          </div>
+        )}
         <div className="rs-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={view === 'resize'} className={'rs-tab' + (view === 'resize' ? ' on' : '')} onClick={() => setView('resize')}>Resize</button>
           <button type="button" role="tab" aria-selected={view === 'collage'} className={'rs-tab' + (view === 'collage' ? ' on' : '')}
