@@ -22,6 +22,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   // appear to process forever without ever reaching the worker.
   useEffect(() => { itemsRef.current = items; }, [items]);
   const [selection, setSelection] = useState(new Set());     // multi-select of item ids
+  const [sendingToResize, setSendingToResize] = useState(false);
   const [chosenRatioGlobal, setChosenRatioGlobal] = useState(() => localStorage.getItem('wp_ratio') || '1:1');
   useEffect(()=>{ localStorage.setItem('wp_ratio', chosenRatioGlobal); }, [chosenRatioGlobal]);
 
@@ -1005,6 +1006,29 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     setShowStudioModal(true);
   };
 
+  // Hands the background-removed (transparent) photos over to the Resize screen, where they can
+  // be fitted into a quarter circle, a custom size, etc. The Resize screen picks them up on open.
+  const sendToResize = async (list) => {
+    const ready = (list || []).filter(item => item.cutout);
+    if (!ready.length || sendingToResize) return;
+    setSendingToResize(true);
+    try {
+      const files = [];
+      for (const item of ready) {
+        const blob = await (await fetch(item.cutout)).blob();
+        const base = String(item.name || 'photo').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'photo';
+        files.push(new File([blob], `${base}-cutout.png`, { type: blob.type || 'image/png' }));
+      }
+      window.__wpResizeInbox = [...(window.__wpResizeInbox || []), ...files];
+      if (onGoto) onGoto('resize');
+    } catch (error) {
+      console.warn('Could not send to Resize', error);
+      setBatchSaveNotice('Could not send the photos to Resize. Please try again.');
+    } finally {
+      setSendingToResize(false);
+    }
+  };
+
   const clearSavedGallery = () => setSavedShots([]);
 
   const getCollageCandidates = useCallback(() => {
@@ -1219,6 +1243,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                     </button>
                     <button className="btn btn-primary" style={{padding:'7px 12px', fontSize:12}} disabled={!items.some(item => selection.has(item.id) && item.cutout)} onClick={runGenerateBatch}>
                       <Icon name="sparkles" className="ico-sm"/> Generate shots · {items.filter(item => selection.has(item.id) && item.cutout).length}
+                    </button>
+                    <button className="btn btn-blush" style={{padding:'7px 12px', fontSize:12}} disabled={sendingToResize || !items.some(item => selection.has(item.id) && item.cutout)} onClick={()=>sendToResize(items.filter(item => selection.has(item.id)))} title="Send the background-removed photos to the Resize screen (quarter circles, custom sizes…)">
+                      <Icon name="layout" className="ico-sm"/> {sendingToResize ? 'Sending…' : `Send to Resize · ${items.filter(item => selection.has(item.id) && item.cutout).length}`}
                     </button>
                   </>
                 ) : (
@@ -1564,6 +1591,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                 </button>
                 <button className="btn btn-ghost save-phone-btn" disabled={!activeItem.cutout || !selectedResult || selectedResult.status !== 'ok'} onClick={()=>saveFinishedShotToPhone()}>
                   <Icon name="download" className="ico-sm"/> <span className="compact-action-label">Save to phone</span>
+                </button>
+                <button className="btn btn-ghost" disabled={!activeItem.cutout || sendingToResize} onClick={()=>sendToResize([activeItem])} title="Send this background-removed photo to the Resize screen (quarter circles, custom sizes…)">
+                  <Icon name="layout" className="ico-sm"/> <span className="compact-action-label">{sendingToResize ? 'Sending…' : 'Send to Resize'}</span>
                 </button>
                 <label className="generation-count-control" title="Number of browser-composited studio outputs made for this photo"><span>Outputs</span><select value={generationCount} onChange={(e)=>setGenerationCount(Number(e.target.value))} aria-label="Number of studio outputs"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
                 <button className="btn btn-blush" disabled={!activeItem.cutout} onClick={runGenerateActive}>
