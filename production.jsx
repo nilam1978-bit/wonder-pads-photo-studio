@@ -2,6 +2,29 @@
 // Each uploaded photo is an "item" in a gallery. BG removal is started per item;
 // backdrop / ratio / results are per-item and edited when an item is "active".
 
+// Remembers the working photo behind each saved shot (original, cut-out, settings) in the browser's
+// IndexedDB so "Open refine" still works after a refresh or after leaving this tab.
+(function(){
+  const DB='wp_refine', ST='sessions';
+  const open=()=>new Promise((res,rej)=>{
+    if(!window.indexedDB) return rej(new Error('no indexedDB'));
+    const r=indexedDB.open(DB,1);
+    r.onupgradeneeded=()=>r.result.createObjectStore(ST,{keyPath:'id'});
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+  const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction(ST,mode);const req=fn(t.objectStore(ST));t.oncomplete=()=>{db.close();res(req&&req.result);};t.onerror=()=>{db.close();rej(t.error);};t.onabort=()=>{db.close();rej(t.error);};});};
+  const toBlob=async(src)=>{ if(!src) return null; if(src instanceof Blob) return src; const r=await fetch(src); return r.blob(); };
+  const api={
+    async put(rec){ await tx('readwrite',st=>st.put(rec)); },
+    async get(id){ return tx('readonly',st=>st.get(id)); },
+    async del(id){ await tx('readwrite',st=>st.delete(id)); },
+    async clear(){ await tx('readwrite',st=>st.clear()); },
+    async keep(ids){ const all=await tx('readonly',st=>st.getAllKeys()); for(const k of (all||[])) if(!ids.includes(k)) await api.del(k); },
+    toBlob,
+  };
+  window.WPRefineStore=api;
+})();
+
 const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
@@ -577,10 +600,12 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const [savingSelectedResult, setSavingSelectedResult] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
   const [batchSaveNotice, setBatchSaveNotice] = useState('');
+  const [savedNotice, setSavedNotice] = useState('');
   const [savingBatchAll, setSavingBatchAll] = useState(false);
   useEffect(() => {
     try { localStorage.setItem('wp_saved_shots', JSON.stringify(savedShots)); } catch (_) {}
     window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
+    try { window.WPRefineStore.keep(Array.from(new Set(savedShots.map(sh => sh.itemId)))).catch(()=>{}); } catch (_) {}
   }, [savedShots]);
   useEffect(() => {
     try { localStorage.setItem('wp_saved_logos', JSON.stringify(savedLogos)); }
@@ -973,6 +998,22 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         src: output,
         savedAt: new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }),
       };
+      // Keep the working photo + settings so Open refine can bring this shot back later.
+      try {
+        const S = window.WPRefineStore;
+        const results = [];
+        for (const r of (activeItem.results || [])) {
+          const { src, ...rest } = r;
+          results.push({ ...rest, srcBlob: r.status === 'ok' ? await S.toBlob(src) : null });
+        }
+        await S.put({
+          id: activeItem.id, name: activeItem.name, w: activeItem.w, h: activeItem.h, ratio: activeItem.ratio,
+          chosenBackdropIds: activeItem.chosenBackdropIds, batchUpload: !!activeItem.batchUpload,
+          cutoutEdited: !!activeItem.cutoutEdited, cutoutMethod: activeItem.cutoutMethod || '',
+          original: await S.toBlob(activeItem.src), manualSrc: await S.toBlob(activeItem.manualSrc),
+          cutout: await S.toBlob(activeItem.cutout), results, savedAt: Date.now(),
+        });
+      } catch (err) { console.warn('Could not remember the refine session', err); }
       const wasSaved = !!savedShots.find(shot => shot.key === key);
       setSavedShots(prev => [...prev.filter(shot => shot.key !== key), savedShot]);
       setSaveNotice(wasSaved ? 'Saved gallery updated' : 'Saved to gallery');
@@ -991,14 +1032,70 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     downloadOne(shot.src, shot.fileName || 'wonder-pads-studio-shot.png');
   };
 
-  const reopenSavedShot = (shot) => {
-    if (!shot || !items.some(item => item.id === shot.itemId)) return;
+  const showSavedNotice = (text) => {
+    setSavedNotice(text);
+    window.setTimeout(() => setSavedNotice(current => (current === text ? '' : current)), 9000);
+  };
+
+  // Open refine: if the photo is still loaded, reopen it. Otherwise rebuild it from the copy kept
+  // in the browser's storage when the shot was saved.
+  const [reopeningKey, setReopeningKey] = useState('');
+  const reopenSavedShot = async (shot) => {
+    if (!shot || reopeningKey) return;
+    if (!itemsRef.current.some(item => item.id === shot.itemId)) {
+      setReopeningKey(shot.key);
+      try {
+        const rec = await window.WPRefineStore.get(shot.itemId);
+        if (!rec || !rec.cutout) throw new Error('missing');
+        const url = (b) => (b ? URL.createObjectURL(b) : null);
+        const src = url(rec.original);
+        const manualSrc = url(rec.manualSrc);
+        const cutout = url(rec.cutout);
+        const baseResults = (rec.results || []).map(r => {
+          const { srcBlob, ...rest } = r;
+          return resultDefaults({ ...rest, src: srcBlob ? URL.createObjectURL(srcBlob) : '', status: srcBlob ? 'ok' : (rest.status === 'ok' ? 'pending' : rest.status) });
+        });
+        const restored = {
+          id: rec.id, name: rec.name, src, sourceObjectUrl: true, batchUpload: !!rec.batchUpload,
+          w: rec.w, h: rec.h, manualSrc, cutout, cutoutEdited: !!rec.cutoutEdited, cutoutMethod: rec.cutoutMethod || 'restored',
+          bgProgress: { key:'done', percent:100 }, bgError: null, restored: true,
+          previewDraft: resultDefaults({ status:'ok', src, backdropId:(rec.chosenBackdropIds||[])[0], ratio:rec.ratio }),
+          results: baseResults.length ? baseResults : null,
+          chosenBackdropIds: rec.chosenBackdropIds || presetBackdropIds.slice(), ratio: rec.ratio || presetRatio,
+        };
+        itemsRef.current = [...itemsRef.current, restored];
+        setItems(prev => prev.some(it => it.id === restored.id) ? prev : [...prev, restored]);
+      } catch (e) {
+        showSavedNotice(`Sorry, the original photo for "${shot.itemName}" wasn't kept on this device (it was saved before this update, or browser storage was cleared). Save it once more from Refine to make it reopenable, or use Send to Resize / Download on this saved image.`);
+        setReopeningKey('');
+        return;
+      }
+      setReopeningKey('');
+    }
     setActiveId(shot.itemId);
     setSelectedResultIdx(shot.resultIndex || 0);
     setShowStudioModal(true);
   };
 
   const batchResults = useMemo(() => items.flatMap(item => (item.results || []).map((result, resultIndex) => ({ item, result, resultIndex })).filter(entry => entry.result.batchApplied && entry.result.status === 'ok')).sort((a, b) => (b.result.batchAppliedAt || 0) - (a.result.batchAppliedAt || 0)), [items]);
+
+  // Sends a saved gallery image (as saved) to the Resize screen. Works even when the original
+  // photo is no longer loaded, because it uses the saved image itself.
+  const sendSavedShotToResize = async (shot) => {
+    if (!shot?.src || sendingToResize) return;
+    setSendingToResize(true);
+    try {
+      const blob = await (await fetch(shot.src)).blob();
+      const base = String(shot.itemName || 'photo').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'photo';
+      window.__wpResizeInbox = [...(window.__wpResizeInbox || []), new File([blob], `${base}-${shot.backdropId || 'saved'}.png`, { type: blob.type || 'image/png' })];
+      if (onGoto) onGoto('resize');
+    } catch (error) {
+      console.warn('Could not send saved shot to Resize', error);
+      showSavedNotice('Could not send that saved image to Resize. Please try again.');
+    } finally {
+      setSendingToResize(false);
+    }
+  };
 
   const reopenBatchResult = (entry) => {
     setActiveId(entry.item.id);
@@ -1029,7 +1126,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     }
   };
 
-  const clearSavedGallery = () => setSavedShots([]);
+  const clearSavedGallery = () => { setSavedShots([]); try { window.WPRefineStore.clear().catch(()=>{}); } catch (_) {} };
 
   const getCollageCandidates = useCallback(() => {
     const workingShots = items.flatMap(item => (item.results || [])
@@ -1483,6 +1580,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
               <button type="button" className="btn btn-ghost" style={{padding:'7px 10px', fontSize:11}} onClick={clearSavedGallery}>Clear all</button>
             </div>
           </div>
+          {savedNotice && <div role="status" style={{margin:'0 0 12px', padding:'10px 14px', borderRadius:12, background:'var(--blush-soft)', border:'1px solid rgba(196,122,184,.3)', color:'var(--ink)', fontSize:12.5, lineHeight:1.45}}>{savedNotice}</div>}
           <div className="saved-gallery-grid">
             {savedShots.map(shot => (
               <div className="saved-shot-card" key={shot.key}>
@@ -1494,8 +1592,9 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
                   <div className="saved-shot-name" title={shot.itemName}>{shot.itemName}</div>
                   <div className="saved-shot-details">{shot.backdropName} · {shot.ratio} · {shot.savedAt}</div>
                   <div className="saved-shot-actions">
-                    <button type="button" className="btn btn-ghost" onClick={()=>reopenSavedShot(shot)}><Icon name="edit" className="ico-sm"/> Open refine</button>
+                    {shot.source !== 'resize' && <button type="button" className="btn btn-ghost" disabled={!!reopeningKey} title="Reopen this shot in the refine window" onClick={()=>reopenSavedShot(shot)}><Icon name="edit" className="ico-sm"/> {reopeningKey === shot.key ? 'Opening…' : 'Open refine'}</button>}
                     <button type="button" className="btn btn-blush" onClick={()=>downloadSavedShot(shot)}><Icon name="download" className="ico-sm"/> Download</button>
+                    <button type="button" className="btn btn-ghost" disabled={sendingToResize} onClick={()=>sendSavedShotToResize(shot)} title="Send this saved image to the Resize screen"><Icon name="layout" className="ico-sm"/> Send to Resize</button>
                   </div>
                 </div>
               </div>
