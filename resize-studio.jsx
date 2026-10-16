@@ -202,6 +202,51 @@
   const extFromType = (t) => (t === 'image/png' ? 'png' : t === 'image/webp' ? 'webp' : 'jpg');
   const baseName = (name) => String(name || 'photo').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'photo';
 
+  // ---- Saved Gallery ----
+  // Puts a finished picture into the same Saved Gallery that Production uses (browser storage).
+  // Storage is small, so the gallery copy is limited to 1400 px on the long side; the Download
+  // buttons still give the full-size file. See-through pieces stay PNG, everything else is JPG.
+  const blobToImage = (blob) => new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
+    const im = new Image();
+    im.onload = () => { URL.revokeObjectURL(url); res(im); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read the image.')); };
+    im.src = url;
+  });
+  async function galleryDataUrl(blob, keepAlpha) {
+    const im = await blobToImage(blob);
+    const k = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight));
+    const w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    if (!keepAlpha) { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h); }
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(im, 0, 0, w, h);
+    return { src: keepAlpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.9), ext: keepAlpha ? 'png' : 'jpg', w, h };
+  }
+  // shots: [{ key, name, label, blob, keepAlpha }]  -> returns how many were saved
+  async function saveToGallery(shots) {
+    let list = [];
+    try { const v = JSON.parse(localStorage.getItem('wp_saved_shots') || '[]'); if (Array.isArray(v)) list = v; } catch (_) {}
+    let saved = 0;
+    const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    for (const sh of shots) {
+      const g = await galleryDataUrl(sh.blob, sh.keepAlpha);
+      const entry = {
+        key: sh.key, source: 'resize', itemId: sh.key, itemName: sh.name, resultIndex: 0,
+        backdropId: 'resize', backdropName: sh.label, ratio: `${g.w}×${g.h}`,
+        fileName: `${baseName(sh.name)}-resize.${g.ext}`, src: g.src, savedAt: time,
+      };
+      const next = [...list.filter((x) => x.key !== sh.key), entry];
+      try { localStorage.setItem('wp_saved_shots', JSON.stringify(next)); }
+      catch (_) { if (saved) window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated')); throw new Error('The Saved Gallery is full on this device. Remove a few saved photos there, then try again.'); }
+      list = next; saved += 1;
+    }
+    window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
+    return saved;
+  }
+
   function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -267,9 +312,10 @@
         let iw = imgEl.naturalWidth;
         let ih = imgEl.naturalHeight;
         if (!iw || !ih) { URL.revokeObjectURL(url); reject(new Error('empty')); return; }
+        let didTrim = false;
         if (opts && opts.trim) {
           const trimmed = trimTransparent(imgEl, iw, ih);
-          if (trimmed) { el = trimmed; iw = trimmed.width; ih = trimmed.height; }
+          if (trimmed) { el = trimmed; iw = trimmed.width; ih = trimmed.height; didTrim = true; }
         }
         // A lighter copy used only for the live preview, so dragging stays smooth.
         const k = Math.min(1, 1600 / Math.max(iw, ih));
@@ -280,7 +326,7 @@
         px.imageSmoothingEnabled = true;
         px.imageSmoothingQuality = 'high';
         px.drawImage(stepDown(el, iw, ih, proxy.width), 0, 0, proxy.width, proxy.height);
-        resolve({ url, el, iw, ih, proxy });
+        resolve({ url, el, iw, ih, proxy, trimmed: didTrim });
       };
       imgEl.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
       imgEl.src = url;
@@ -551,6 +597,14 @@
       saveBlob(blobRef.current, `wonder-pads-collage-${layout.id}-${ratioDef.id.replace(':', 'x')}.${extFromType(blobRef.current.type)}`);
     };
 
+    const saveCollageToGallery = async () => {
+      if (!blobRef.current) return;
+      try {
+        await saveToGallery([{ key: `resize-collage:${Date.now()}`, name: 'Resize collage', label: 'Collage', blob: blobRef.current, keepAlpha: false }]);
+        setNotice({ text: 'Collage saved to your Saved Gallery.', err: false });
+      } catch (e) { setNotice({ text: e.message || 'Could not save to the gallery.', err: true }); }
+    };
+
     const pickedValid = picked.filter((id) => items.some((i) => i.id === id));
 
     return (
@@ -615,6 +669,7 @@
               <Icon name="sparkles" className="ico-sm"/> {busy ? 'Building…' : previewUrl ? 'Rebuild collage' : 'Build collage'}
             </button>
             <button type="button" className="btn btn-blush" disabled={!previewUrl || busy} onClick={download}><Icon name="download" className="ico-sm"/> Download collage</button>
+            <button type="button" className="btn btn-ghost" disabled={!previewUrl || busy} onClick={saveCollageToGallery}><Icon name="check" className="ico-sm"/> Save to gallery</button>
           </div>
           {notice.text && <div className={'rs-notice' + (notice.err ? ' err' : '')} role="status">{notice.text}</div>}
         </div>
@@ -650,7 +705,7 @@
     const [sameForAll, setSameForAll] = useState(true);
     const [view, setView] = useState('resize');
     const [picking, setPicking] = useState(false);
-    const [banner, setBanner] = useState(0);
+    const [banner, setBanner] = useState(null);
     const [recent, setRecent] = useState(() => {
       try {
         const saved = JSON.parse(localStorage.getItem('wp_resize_recent') || '[]');
@@ -683,7 +738,7 @@
     // ----- add photos -----
     const addFiles = async (fileList, opts) => {
       const files = Array.from(fileList || []).filter((f) => /^image\//.test(f.type)).slice(0, 50);
-      if (!files.length) { say('Please choose image files (JPG, PNG, WebP, HEIC…).', true); return 0; }
+      if (!files.length) { say('Please choose image files (JPG, PNG, WebP, HEIC…).', true); return []; }
       say('Loading photos…');
       const base = itemsRef.current.find((i) => i.id === activeIdRef.current) || itemsRef.current[0] || null;
       const added = [];
@@ -715,7 +770,7 @@
         setActiveId((cur) => cur || added[0].id);
       }
       say(failed ? `${added.length} added, ${failed} could not be read.` : `${added.length} photo${added.length === 1 ? '' : 's'} added.`, failed > 0 && !added.length);
-      return added.length;
+      return added;
     };
 
     // Photos sent over from the Production screen (background already removed) arrive here.
@@ -723,7 +778,7 @@
       const inbox = window.__wpResizeInbox;
       if (Array.isArray(inbox) && inbox.length) {
         window.__wpResizeInbox = [];
-        addFiles(inbox, { trim: true }).then((n) => { if (n) setBanner(n); });
+        addFiles(inbox, { trim: true }).then((arr) => { if (arr && arr.length) setBanner({ count: arr.length, trimmed: arr.filter((a) => a.trimmed).length }); });
       }
     // eslint-disable-next-line
     }, []);
@@ -925,6 +980,29 @@
       setBusy(false);
     };
 
+    const galleryEntry = async (it) => {
+      const { blob } = await renderToBlob(it, 'png', 1);
+      return { key: `resize:${it.id}:${it.ratioId || ""}:${it.quarterCorner || ""}`, name: it.name, label: isShaped(it) ? 'Resize · see-through' : 'Resize', blob, keepAlpha: isShaped(it) };
+    };
+    const saveActiveToGallery = async () => {
+      if (!active || busy) return;
+      setBusy(true); say('Saving to gallery…');
+      try { await saveToGallery([await galleryEntry(active)]); say('Saved to your Saved Gallery.'); }
+      catch (e) { say(e.message || 'Could not save to the gallery.', true); }
+      setBusy(false);
+    };
+    const saveAllToGallery = async () => {
+      if (!items.length || busy) return;
+      setBusy(true); say('Saving to gallery…');
+      try {
+        const list = [];
+        for (const it of itemsRef.current) list.push(await galleryEntry(it));
+        const n = await saveToGallery(list);
+        say(`Saved ${n} photo${n === 1 ? '' : 's'} to your Saved Gallery.`);
+      } catch (e) { say(e.message || 'Could not save to the gallery.', true); }
+      setBusy(false);
+    };
+
     const canShare = typeof navigator !== 'undefined' && !!navigator.canShare && !!navigator.share;
     const shareAll = async () => {
       if (!items.length || busy) return;
@@ -995,15 +1073,15 @@
         <style>{STYLES}</style>
         {heading}
         {fileInput}
-        {banner > 0 && view === 'resize' && (
+        {banner && view === 'resize' && (
           <div className="rs-banner" role="status">
             <div>
-              <strong>{banner} background-removed photo{banner === 1 ? '' : 's'} received from Production.</strong>
-              <span> The empty see-through edges were trimmed so your product fills the shape.</span>
+              <strong>{banner.count} photo{banner.count === 1 ? '' : 's'} received from Production.</strong>
+              {banner.trimmed > 0 && <span> The empty see-through edges were trimmed so your product fills the shape.</span>}
             </div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-primary" onClick={() => { applyShared({ ratioId: 'quarter' }, true); setBanner(0); }}>Fit into ¼ circle pieces</button>
-              <button type="button" className="btn btn-ghost" onClick={() => setBanner(0)}>Keep current size</button>
+              <button type="button" className="btn btn-primary" onClick={() => { applyShared({ ratioId: 'quarter' }, true); setBanner(null); }}>Fit into ¼ circle pieces</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setBanner(null)}>Keep current size</button>
             </div>
           </div>
         )}
@@ -1163,6 +1241,8 @@
 
             <div className="rs-actions">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={downloadActive}><Icon name="download" className="ico-sm"/> Download this photo</button>
+              <button type="button" className="btn btn-blush" disabled={busy} onClick={saveActiveToGallery}><Icon name="check" className="ico-sm"/> Save to gallery</button>
+              {items.length > 1 && <button type="button" className="btn btn-ghost" disabled={busy} onClick={saveAllToGallery}><Icon name="check" className="ico-sm"/> Save all {items.length} to gallery</button>}
               {items.length > 1 && <button type="button" className="btn btn-blush" disabled={busy} onClick={downloadAll}><Icon name="download" className="ico-sm"/> Download all {items.length}</button>}
               {canShare && <button type="button" className="btn btn-ghost" disabled={busy} onClick={shareAll}><Icon name="save" className="ico-sm"/> Share / save to phone</button>}
             </div>
