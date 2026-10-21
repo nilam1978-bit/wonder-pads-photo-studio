@@ -16,3 +16,41 @@
 @media(max-width:760px){.wp-sil{height:auto;min-height:calc(100dvh - 60px);overflow:visible}.wp-sil-head{gap:10px}.wp-sil-head nav{order:3;width:100%;justify-content:center;border-top:1px solid #eee;padding-top:8px}.wp-sil-head-end{margin-left:auto}.wp-sil-layout{display:flex;flex-direction:column}.wp-sil-library{border-right:0;border-bottom:1px solid var(--sil-line);max-height:230px}.wp-sil-library>.wp-sil-help,.wp-sil-library-empty{display:none}.wp-sil-assets{display:flex;overflow-x:auto;margin-top:10px}.wp-sil-assets button{width:85px;flex-shrink:0}.wp-sil-assets img{height:65px}.wp-sil-layers{flex-direction:row;overflow:auto}.wp-sil-layers>div{min-width:130px;max-width:170px;flex-shrink:0}.wp-sil-panel-title:not(:first-child){margin-top:10px}.wp-sil-panel-title{margin-bottom:8px}.wp-sil-ribbon{display:flex;align-items:center;gap:4px;overflow-x:auto;padding:5px 6px;border:1px solid #e2ceda;border-radius:10px;background:#fff;box-shadow:0 5px 15px #60344912;flex-shrink:0}.wp-sil-ribbon button{min-height:32px;padding:6px 8px;font-size:11px;white-space:nowrap}.wp-sil-ribbon .active{background:#7a3d5c;color:#fff}.wp-sil-ribbon-spacer{flex:1;min-width:8px}.wp-sil-review{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:20px;background:#392331aa}.wp-sil-review>div{width:min(680px,94vw);padding:20px;border-radius:16px;background:#fff;border:1px solid #e4d6df;box-shadow:0 20px 60px #24121f55}.wp-sil-review h3{font:24px Georgia,serif}.wp-sil-review p{margin:6px 0 12px;color:#876b7c}.wp-sil-review svg{display:block;width:100%;height:min(55vh,520px);margin-bottom:14px;background:#f2eff1}.wp-sil-review button{margin-right:6px}.wp-sil-main{min-height:470px;height:62dvh;flex:none;padding:9px}.wp-sil-inspector{border-left:0;border-top:1px solid var(--sil-line);overflow:visible}.wp-sil-toolbar button{padding:7px;font-size:11px}.wp-sil-toolbar .wp-sil-divider{display:none}.wp-sil-crop-banner span{display:none}.wp-sil-full{height:100dvh;overflow:auto}.wp-sil-status{max-height:90px;overflow:auto}.wp-sil-help{font-size:13px}}
 
 .wp-sil-movebar{margin:2px 0 10px}.wp-sil-movebar button{width:100%}
+
+.wp-sil-open-lib{width:100%;margin-top:12px}.wp-sil-lib-summary{margin:10px 0 0}
+.wp-sil-drawer-overlay{position:fixed;inset:0;z-index:210;background:#392331aa;display:flex;justify-content:flex-start}
+.wp-sil-drawer{width:min(400px,100%);height:100%;background:#fff;display:flex;flex-direction:column;box-shadow:0 0 40px #24121f55}
+.wp-sil-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--sil-line);flex-shrink:0}.wp-sil-drawer-head h3{font:22px Georgia,serif}
+.wp-sil-drawer-body{padding:14px 16px 24px;overflow:auto;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.wp-sil-lib-search{width:100%;padding:10px 12px;border:1px solid var(--sil-line);border-radius:9px;font-size:14px}
+.wp-sil-manage summary{cursor:pointer;font-size:12px;color:#876b7c;padding:4px 0}.wp-sil-manage .wp-sil-folder-actions{margin:8px 0}
+.wp-sil-lib-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}.wp-sil-lib-tabs button{font-size:12px}
+.wp-sil-drawer-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}.wp-sil-drawer-grid img,.wp-sil-drawer-grid svg{height:120px}
+@media(max-width:760px){.wp-sil-drawer-overlay{align-items:flex-end}.wp-sil-drawer{width:100%;height:88dvh;border-radius:18px 18px 0 0}.wp-sil-drawer-grid{display:grid;overflow:visible}.wp-sil-drawer-grid button{width:auto}.wp-sil-drawer-grid img,.wp-sil-drawer-grid svg{height:110px}.wp-sil-library{max-height:none}}
+
+.wp-sil-dock-toggle{display:none}
+/* ---- Phone layout: fixed screen, big canvas, tools docked at the bottom ---- */
+@media(max-width:760px){
+  .wp-sil{height:100dvh;min-height:0;overflow:hidden}
+  .wp-sil-head{padding:8px 12px;gap:4px 8px;align-items:center}.wp-sil-eyebrow{display:none}.wp-sil-head h2{font-size:18px}
+  .wp-sil-head-end{gap:6px}.wp-sil-head-end button{min-height:32px;padding:5px 9px;font-size:12px}
+  .wp-sil-head nav{padding-top:4px;gap:2px}.wp-sil-head nav button{padding:6px 10px;min-height:34px;font-size:13px}.wp-sil-head nav button span{width:20px;height:20px}
+  .wp-sil-layout{flex:1;min-height:0;display:flex;flex-direction:column}
+  .wp-sil-library{flex:none;max-height:none;padding:6px 10px;display:flex;align-items:center;gap:8px;overflow-x:auto;border-bottom:1px solid var(--sil-line)}
+  .wp-sil-library>.wp-sil-panel-title{display:none}.wp-sil-library .wp-sil-help{display:none}
+  .wp-sil-library .wp-sil-layers{flex:1;min-width:0}.wp-sil-library .wp-sil-open-lib{width:auto;margin:0;flex-shrink:0;white-space:nowrap}
+  .wp-sil-library>button{flex-shrink:0;white-space:nowrap}
+  .wp-sil-main{flex:1;min-height:0;height:auto;padding:6px;gap:6px}
+  .wp-sil-surface{min-height:0}
+  .wp-sil-status{min-height:0;max-height:34px;overflow:hidden;font-size:11px}
+  .wp-sil-inspector{flex:none;max-height:33dvh;overflow:auto;padding:0 12px 12px;gap:10px;border-left:0;border-top:1px solid var(--sil-line);box-shadow:0 -6px 18px #4e304214;-webkit-overflow-scrolling:touch}
+  .wp-sil-dock-toggle{display:block;position:sticky;top:0;z-index:2;width:calc(100% + 24px);margin:0 -12px;border:0;border-radius:0;border-bottom:1px solid var(--sil-line);background:#fff;font-size:12px;font-weight:600;color:#7a3d5c;min-height:36px;flex-shrink:0}
+  .wp-sil-inspector.collapsed{max-height:none;overflow:visible;padding-bottom:0}.wp-sil-inspector.collapsed>*:not(.wp-sil-dock-toggle){display:none}
+  .wp-sil-inspector .wp-sil-help{display:none}.wp-sil-inspector .wp-sil-piece-name{display:block}
+  .wp-sil-inspector button,.wp-sil-inspector input{min-height:40px}.wp-sil-inspector h3{display:none}
+  .wp-sil-create{padding-top:12px;margin-top:0;gap:10px}
+  .wp-sil-ribbon{position:static;transform:none;left:auto;top:auto;width:auto;max-width:100%;z-index:auto}.wp-sil-ribbon button{min-height:36px;padding:6px 10px;font-size:12px}
+  .wp-sil-crop-banner{bottom:8px}
+  .wp-sil-library--later{display:none}
+  .wp-sil-full{height:100dvh;overflow:hidden}
+}
