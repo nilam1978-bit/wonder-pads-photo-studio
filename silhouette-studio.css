@@ -54,3 +54,9 @@
   .wp-sil-library--later{display:none}
   .wp-sil-full{height:100dvh;overflow:hidden}
 }
+
+.wp-sil-pill{position:absolute;z-index:30;display:flex;align-items:center;gap:2px;padding:3px;background:#fff;border:1px solid #e2ceda;border-radius:999px;box-shadow:0 6px 18px #4e304233}
+.wp-sil-pill button{width:30px;height:30px;min-height:0;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:transparent}
+.wp-sil-pill button:hover:not(:disabled){background:#f4e3ed}.wp-sil-pill button.danger{color:#a23657}.wp-sil-pill-sep{width:1px;height:18px;background:#e2ceda;margin:0 2px}
+.wp-sil .wp-sil-phone-only{display:none}
+@media(max-width:760px){.wp-sil .wp-sil-phone-only{display:block}.wp-sil .wp-sil-button-grid.wp-sil-phone-only{display:grid}.wp-sil-pill{display:none}}
