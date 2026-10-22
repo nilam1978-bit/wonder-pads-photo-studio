@@ -2,29 +2,6 @@
 // Each uploaded photo is an "item" in a gallery. BG removal is started per item;
 // backdrop / ratio / results are per-item and edited when an item is "active".
 
-// Remembers the working photo behind each saved shot (original, cut-out, settings) in the browser's
-// IndexedDB so "Open refine" still works after a refresh or after leaving this tab.
-(function(){
-  const DB='wp_refine', ST='sessions';
-  const open=()=>new Promise((res,rej)=>{
-    if(!window.indexedDB) return rej(new Error('no indexedDB'));
-    const r=indexedDB.open(DB,1);
-    r.onupgradeneeded=()=>r.result.createObjectStore(ST,{keyPath:'id'});
-    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
-  });
-  const tx=async(mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction(ST,mode);const req=fn(t.objectStore(ST));t.oncomplete=()=>{db.close();res(req&&req.result);};t.onerror=()=>{db.close();rej(t.error);};t.onabort=()=>{db.close();rej(t.error);};});};
-  const toBlob=async(src)=>{ if(!src) return null; if(src instanceof Blob) return src; const r=await fetch(src); return r.blob(); };
-  const api={
-    async put(rec){ await tx('readwrite',st=>st.put(rec)); },
-    async get(id){ return tx('readonly',st=>st.get(id)); },
-    async del(id){ await tx('readwrite',st=>st.delete(id)); },
-    async clear(){ await tx('readwrite',st=>st.clear()); },
-    async keep(ids){ const all=await tx('readonly',st=>st.getAllKeys()); for(const k of (all||[])) if(!ids.includes(k)) await api.del(k); },
-    toBlob,
-  };
-  window.WPRefineStore=api;
-})();
-
 const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
@@ -585,12 +562,13 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
 
   const [selectedResultIdx, setSelectedResultIdx] = useState(0);
   const [exportFormat, setExportFormat] = useState('png');
-  const [savedShots, setSavedShots] = useState(() => {
-    try {
-      const value = JSON.parse(localStorage.getItem('wp_saved_shots') || '[]');
-      return Array.isArray(value) ? value : [];
-    } catch (_) { return []; }
-  });
+  // The Saved Gallery list lives in a shared store: small cards in localStorage, full pictures in IndexedDB.
+  const [savedShots, setSavedShots] = useState(() => (window.WPGallery ? window.WPGallery.list() : []));
+  useEffect(() => {
+    const sync = () => setSavedShots(window.WPGallery ? window.WPGallery.list() : []);
+    window.addEventListener('wp-saved-gallery-updated', sync);
+    return () => window.removeEventListener('wp-saved-gallery-updated', sync);
+  }, []);
   const [savedLogos, setSavedLogos] = useState(() => {
     try {
       const value = JSON.parse(localStorage.getItem('wp_saved_logos') || '[]');
@@ -603,9 +581,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   const [savedNotice, setSavedNotice] = useState('');
   const [savingBatchAll, setSavingBatchAll] = useState(false);
   useEffect(() => {
-    try { localStorage.setItem('wp_saved_shots', JSON.stringify(savedShots)); } catch (_) {}
-    window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
-    try { window.WPRefineStore.keep(Array.from(new Set(savedShots.map(sh => sh.itemId)))).catch(()=>{}); } catch (_) {}
+    // Forget the working copies of photos whose saved shots were removed.
+    try { window.WPRefineStore.keep(Array.from(new Set(savedShots.map(sh => sh.itemId)))).catch(() => {}); } catch (_) {}
   }, [savedShots]);
   useEffect(() => {
     try { localStorage.setItem('wp_saved_logos', JSON.stringify(savedLogos)); }
@@ -1015,26 +992,112 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
         });
       } catch (err) { console.warn('Could not remember the refine session', err); }
       const wasSaved = !!savedShots.find(shot => shot.key === key);
-      setSavedShots(prev => [...prev.filter(shot => shot.key !== key), savedShot]);
+      const { src: fullSrc, ...shotMeta } = savedShot;
+      await window.WPGallery.save(shotMeta, await window.WPRefineStore.toBlob(fullSrc));
       setSaveNotice(wasSaved ? 'Saved gallery updated' : 'Saved to gallery');
       setTimeout(() => setSaveNotice(''), 2600);
     } catch (e) {
       console.warn('Could not save studio shot', e);
-      setSaveNotice('Could not save this shot');
-      setTimeout(() => setSaveNotice(''), 2600);
+      setSaveNotice(e && e.message ? `Could not save this shot. ${e.message}` : 'Could not save this shot');
+      setTimeout(() => setSaveNotice(''), 6000);
     } finally {
       setSavingSelectedResult(false);
     }
   };
 
-  const downloadSavedShot = (shot) => {
-    if (!shot?.src) return;
-    downloadOne(shot.src, shot.fileName || 'wonder-pads-studio-shot.png');
+  const downloadSavedShot = async (shot) => {
+    if (!shot) return;
+    try {
+      const url = await window.WPGallery.fullUrl(shot);
+      downloadOne(url, shot.fileName || 'wonder-pads-studio-shot.png');
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { showSavedNotice(e.message || 'Could not download this saved picture.'); }
   };
 
   const showSavedNotice = (text) => {
     setSavedNotice(text);
     window.setTimeout(() => setSavedNotice(current => (current === text ? '' : current)), 9000);
+  };
+
+  // ---- Auto-save: the workspace is kept in browser storage so a refresh or tab switch doesn't lose uploads ----
+  const [draftOffer, setDraftOffer] = useState(null);   // {count, savedAt} when an earlier session can be resumed
+  const draftOfferRef = useRef(null);
+  const draftBusy = useRef(false);
+  const blobCache = useRef(new Map());
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rec = window.WPDrafts && await window.WPDrafts.get('workspace');
+        if (alive && rec && rec.items && rec.items.length) { draftOfferRef.current = { count: rec.items.length, savedAt: rec.savedAt }; setDraftOffer(draftOfferRef.current); }
+      } catch (_) {}
+    })();
+    return () => { alive = false; };
+  }, []);
+  const draftBlob = async (url) => {
+    if (!url) return null;
+    const hit = blobCache.current.get(url);
+    if (hit) return hit;
+    const b = await window.WPDrafts.toBlob(url);
+    blobCache.current.set(url, b);
+    return b;
+  };
+  useEffect(() => {
+    if (!window.WPDrafts || draftOfferRef.current) return;
+    const timer = window.setTimeout(async () => {
+      if (draftBusy.current) return;
+      draftBusy.current = true;
+      try {
+        if (!items.length) { await window.WPDrafts.del('workspace'); return; }
+        const out = [];
+        for (const it of items) {
+          if (!it.src) continue;
+          const results = [];
+          for (const r of (it.results || [])) {
+            const { src, ...rest } = r;
+            results.push({ ...rest, srcBlob: r.status === 'ok' && src ? await draftBlob(src) : null });
+          }
+          out.push({
+            id: it.id, name: it.name, w: it.w, h: it.h, ratio: it.ratio, chosenBackdropIds: it.chosenBackdropIds,
+            batchUpload: !!it.batchUpload, cutoutEdited: !!it.cutoutEdited, cutoutMethod: it.cutoutMethod || '',
+            original: await draftBlob(it.src), manualSrc: await draftBlob(it.manualSrc), cutout: await draftBlob(it.cutout), results,
+          });
+        }
+        await window.WPDrafts.put({ id: 'workspace', savedAt: Date.now(), presetId: selectedPresetId, activeId, items: out });
+      } catch (e) {
+        try { window.dispatchEvent(new CustomEvent('wp-storage-warning', { detail: 'Your Production workspace could not be auto-saved (' + (e.message || 'storage is full') + '). Save finished shots to the Saved Gallery before leaving.' })); } catch (_) {}
+      } finally { draftBusy.current = false; }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [items, activeId, selectedPresetId, draftOffer]);
+  const resumeDraft = async () => {
+    try {
+      const rec = await window.WPDrafts.get('workspace');
+      const url = (b) => (b ? URL.createObjectURL(b) : null);
+      const restoredItems = (rec?.items || []).filter(r => !itemsRef.current.some(it => it.id === r.id)).map(r => {
+        const src = url(r.original);
+        const baseResults = (r.results || []).map(x => { const { srcBlob, ...rest } = x; return resultDefaults({ ...rest, src: srcBlob ? URL.createObjectURL(srcBlob) : '', status: srcBlob ? 'ok' : (rest.status === 'ok' ? 'pending' : rest.status) }); });
+        const cutout = url(r.cutout);
+        return {
+          id: r.id, name: r.name, src, sourceObjectUrl: true, batchUpload: !!r.batchUpload, w: r.w, h: r.h,
+          manualSrc: url(r.manualSrc), cutout, cutoutEdited: !!r.cutoutEdited, cutoutMethod: r.cutoutMethod || (cutout ? 'restored' : ''),
+          bgProgress: cutout ? { key:'done', percent:100 } : { key:'queued', percent:0 }, bgError: null, restored: true,
+          previewDraft: resultDefaults({ status:'ok', src, backdropId:(r.chosenBackdropIds||[])[0], ratio:r.ratio }),
+          results: baseResults.length ? baseResults : null,
+          chosenBackdropIds: r.chosenBackdropIds || presetBackdropIds.slice(), ratio: r.ratio || presetRatio,
+        };
+      });
+      draftOfferRef.current = null;
+      itemsRef.current = [...itemsRef.current, ...restoredItems];
+      setItems(prev => [...prev, ...restoredItems]);
+      setDraftOffer(null);
+      if (rec?.activeId && restoredItems.some(i => i.id === rec.activeId)) setActiveId(rec.activeId); else if (restoredItems[0] && !activeId) setActiveId(restoredItems[0].id);
+      restoredItems.filter(i => !i.cutout).forEach(i => enqueueBgRemoval(i.id, i, restoredItems.length > 1));
+    } catch (e) { setDraftOffer(null); draftOfferRef.current = null; }
+  };
+  const discardDraft = async () => {
+    draftOfferRef.current = null; setDraftOffer(null);
+    try { await window.WPDrafts.del('workspace'); } catch (_) {}
   };
 
   // Open refine: if the photo is still loaded, reopen it. Otherwise rebuild it from the copy kept
@@ -1082,10 +1145,10 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
   // Sends a saved gallery image (as saved) to the Resize screen. Works even when the original
   // photo is no longer loaded, because it uses the saved image itself.
   const sendSavedShotToResize = async (shot) => {
-    if (!shot?.src || sendingToResize) return;
+    if (!shot || sendingToResize) return;
     setSendingToResize(true);
     try {
-      const blob = await (await fetch(shot.src)).blob();
+      const blob = await window.WPGallery.fullBlob(shot);
       const base = String(shot.itemName || 'photo').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'photo';
       window.__wpResizeInbox = [...(window.__wpResizeInbox || []), new File([blob], `${base}-${shot.backdropId || 'saved'}.png`, { type: blob.type || 'image/png' })];
       if (onGoto) onGoto('resize');
@@ -1126,7 +1189,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     }
   };
 
-  const clearSavedGallery = () => { setSavedShots([]); try { window.WPRefineStore.clear().catch(()=>{}); } catch (_) {} };
+  const clearSavedGallery = async () => { try { await window.WPGallery.clear(); } catch (e) { showSavedNotice(e.message || 'Could not clear the gallery.'); } try { window.WPRefineStore.clear().catch(()=>{}); } catch (_) {} };
 
   const getCollageCandidates = useCallback(() => {
     const workingShots = items.flatMap(item => (item.results || [])
@@ -1141,6 +1204,7 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
       })));
     const finalizedShots = savedShots.map(shot => ({
       key:`saved:${shot.key}`,
+      shotKey:shot.key,
       source:shot.src,
       name:shot.itemName,
       detail:shot.backdropName,
@@ -1183,10 +1247,12 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
     setCollageNotice('');
     try {
       const loaded = await Promise.all(collageSources.map(async source => {
-        const finalizedSource = source.kind === 'Generated' && source.result ? (await renderFinishedShot(source.result, 'png') || source.source) : source.source;
+        let finalizedSource = source.kind === 'Generated' && source.result ? (await renderFinishedShot(source.result, 'png') || source.source) : source.source;
+        let tempUrl = '';
+        if (source.kind === 'Saved' && source.shotKey) { try { tempUrl = await window.WPGallery.fullUrl(source.shotKey); finalizedSource = tempUrl; } catch (_) {} }
         return new Promise((resolve, reject) => {
           const image = new Image();
-          image.onload = () => resolve({ ...source, image });
+          image.onload = () => { if (tempUrl) URL.revokeObjectURL(tempUrl); resolve({ ...source, image }); };
           image.onerror = reject;
           image.src = finalizedSource;
         });
@@ -1293,6 +1359,8 @@ const ProductionGenerator = ({ initialPresetId, onGoto }) => {
           onClose={()=>setShowEditor(false)}
         />
       )}
+
+      {draftOffer && <div className="wp-resume-bar"><div><strong>Resume your last session?</strong> <span>{draftOffer.count} photo{draftOffer.count===1?'':'s'} from your previous Production workspace {draftOffer.savedAt ? '(' + new Date(draftOffer.savedAt).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) + ')' : ''} {draftOffer.count===1?'was':'were'} kept on this device.</span></div><div className="row" style={{gap:8}}><button type="button" className="btn btn-primary" onClick={resumeDraft}>Resume session</button><button type="button" className="btn btn-ghost" onClick={discardDraft}>Discard</button></div></div>}
 
       <div className="page-head">
         <div>

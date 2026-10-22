@@ -13,7 +13,19 @@ const readFabricList = (key, fallback) => {
   try { const parsed = JSON.parse(localStorage.getItem(key) || ''); return Array.isArray(parsed) && parsed.length ? parsed : fallback; }
   catch (_) { return fallback; }
 };
-const writeFabricList = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} };
+const writeFabricList = (key, value) => {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch (_) {
+    try { window.dispatchEvent(new CustomEvent('wp-storage-warning', {detail:'This device\u2019s storage is full, so your latest changes may not be kept after a refresh. Remove some saved photos or fabrics to free space.'})); } catch (__) {}
+    return false;
+  }
+};
+const shrinkForList = async (url) => {
+  if (!url || url.length < 70000 || !window.WPMakeThumb) return url || '';
+  try { return await window.WPMakeThumb(url); } catch (_) { return url.length < 400000 ? url : ''; }
+};
+const dataUrlToBlob = async (url) => (await fetch(url)).blob();
+const blobToDataUrl = (blob) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result || '')); r.onerror = () => reject(new Error('read failed')); r.readAsDataURL(blob); });
 
 const FABRIC_PRESETS = {
   standard: { label:'Standard', note:'1200px · 82% JPEG', maxDimension:1200, quality:.82 },
@@ -118,7 +130,11 @@ const namingErrorLabel = (error) => {
 };
 
 const FabricPrep = ({onGoto, initialFabricId}) => {
-  const [items, setItems] = React.useState(() => readFabricList('wp_prepared_fabrics', []));
+  const [items, setItems] = React.useState(() => readFabricList('wp_prepared_fabrics', []).map(it => ({...it, originalUrl:''})));
+  // thumbs: id -> {thumb, srcLen}. fullIds: ids whose full-size photo is safely in browser photo storage.
+  const thumbsRef = React.useRef(new Map());
+  const fullIdsRef = React.useRef(new Set());
+  const persistSeq = React.useRef(0);
   const [preset, setPreset] = React.useState('standard');
   const [customDimension, setCustomDimension] = React.useState(1200);
   const [customQuality, setCustomQuality] = React.useState(82);
@@ -143,11 +159,58 @@ const FabricPrep = ({onGoto, initialFabricId}) => {
   const fabricImageInputRef = React.useRef(null);
   React.useEffect(() => { writeFabricList('wp_fabric_categories', categoryOptions); }, [categoryOptions]);
   React.useEffect(() => { writeFabricList('wp_fabric_materials', materialOptions); }, [materialOptions]);
+  // Load: the list holds small previews; swap the full-size photos back in from browser photo storage.
   React.useEffect(() => {
-    const portable = items.map(({id,fileName,originalBytes,compressedUrl,compressedBytes,ratio,width,height,category,collection,colorHex,material,tags,inStock,originalUrl,name,nameSource,status,namingNote,createdAt}) => ({id,fileName,originalBytes,compressedUrl,compressedBytes,ratio,width,height,category,collection:collection || category,colorHex:colorHex || '#F4B8C1',material,tags:tags || '',inStock:inStock !== false,originalUrl,name,nameSource,status,namingNote,createdAt:createdAt || Date.now()}));
-    writeFabricList('wp_prepared_fabrics', portable);
-    window.dispatchEvent(new CustomEvent('wp-fabrics-updated'));
-    window.dispatchEvent(new CustomEvent('wp-overview-updated'));
+    let alive = true;
+    (async () => {
+      for (const it of readFabricList('wp_prepared_fabrics', [])) {
+        if (!it.compressedUrl) continue;
+        if (it.hasFull) {
+          thumbsRef.current.set(it.id, {thumb:it.compressedUrl, srcLen:null});
+          fullIdsRef.current.add(it.id);
+          try {
+            const blob = window.WPPhotos && await window.WPPhotos.getBlob(it.id);
+            if (blob && alive) {
+              const full = await blobToDataUrl(blob);
+              thumbsRef.current.set(it.id, {thumb:it.compressedUrl, srcLen:full.length});
+              setItems(prev => prev.map(x => x.id === it.id ? {...x, compressedUrl:full} : x));
+            }
+          } catch (_) {}
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  React.useEffect(() => {
+    const seq = ++persistSeq.current;
+    (async () => {
+      const portable = [];
+      let photoNote = false;
+      for (const it of items) {
+        if (!it.compressedUrl) continue; // photos that were never compressed can't survive a refresh
+        const {id,fileName,originalBytes,compressedUrl,compressedBytes,ratio,width,height,category,collection,colorHex,material,tags,inStock,name,nameSource,status,namingNote,createdAt} = it;
+        let entry = thumbsRef.current.get(id);
+        const fresh = entry && (compressedUrl === entry.thumb || compressedUrl.length === entry.srcLen);
+        let hasFull = fullIdsRef.current.has(id) && fresh;
+        if (!fresh) {
+          try {
+            const blob = await dataUrlToBlob(compressedUrl);
+            const thumb = compressedUrl.length < 70000 ? compressedUrl : await window.WPMakeThumb(blob);
+            entry = {thumb, srcLen:compressedUrl.length};
+            hasFull = false;
+            try { await window.WPPhotos.put(id, blob); fullIdsRef.current.add(id); hasFull = true; }
+            catch (_) { fullIdsRef.current.delete(id); photoNote = true; }
+            thumbsRef.current.set(id, entry);
+          } catch (_) { entry = {thumb:compressedUrl.length < 400000 ? compressedUrl : '', srcLen:compressedUrl.length}; photoNote = true; }
+        }
+        portable.push({id,fileName,originalBytes,compressedUrl:entry.thumb,hasFull,compressedBytes,ratio,width,height,category,collection:collection || category,colorHex:colorHex || '#F4B8C1',material,tags:tags || '',inStock:inStock !== false,originalUrl:'',name,nameSource,status,namingNote,createdAt:createdAt || Date.now()});
+      }
+      if (seq !== persistSeq.current) return; // a newer change is already being saved
+      writeFabricList('wp_prepared_fabrics', portable);
+      if (photoNote) { try { window.dispatchEvent(new CustomEvent('wp-storage-warning', {detail:'A full-size fabric photo could not be kept on this device. Its preview is saved, but you may need to add the photo again after a refresh.'})); } catch (_) {} }
+      window.dispatchEvent(new CustomEvent('wp-fabrics-updated'));
+      window.dispatchEvent(new CustomEvent('wp-overview-updated'));
+    })();
   }, [items]);
 
   const [geminiKey, setGeminiKey] = React.useState(() => window.WPGemini?.hasKey?.() ? (window.WPGemini?.getKey?.() || 'proxy') : '');
@@ -244,7 +307,11 @@ const FabricPrep = ({onGoto, initialFabricId}) => {
     updateItem(item.id, { name:suggestion?.name || fallback, nameSource:suggestion?.source || (namingNote ? `Fallback · ${namingNote}` : 'Local suggestion'), namingNote, status:'ready' });
   };
 
-  const removeItem = (id) => setItems(prev => prev.filter(item => item.id !== id));
+  const removeItem = (id) => {
+    setItems(prev => prev.filter(item => item.id !== id));
+    thumbsRef.current.delete(id); fullIdsRef.current.delete(id);
+    try { window.WPPhotos && window.WPPhotos.del(id).catch(() => {}); } catch (_) {}
+  };
   const saveGeminiKey = () => {
     const value = keyDraft.trim();
     if (!value || !window.WPGemini?.setKey) return;
@@ -350,14 +417,14 @@ const FabricPrep = ({onGoto, initialFabricId}) => {
       padPhoto:'',
     });
   };
-  const createRtsPadFromFabric = () => {
+  const createRtsPadFromFabric = async () => {
     if (!editingFabric || !rtsPadDraft) return;
     const cleanName = (rtsPadDraft.listingName || editingFabric.name || 'Ready-made pad').trim();
     const listing = {
       id:`rts-${Date.now()}`,
       fabricId:editingFabric.id,
       fabricName:editingFabric.name || 'Unnamed fabric',
-      imageUrl:editingFabric.compressedUrl || editingFabric.originalUrl || '',
+      imageUrl:await shrinkForList(thumbsRef.current.get(editingFabric.id)?.thumb || editingFabric.compressedUrl || ''),
       title:cleanName,
       padType:rtsPadDraft.padType || 'Light',
       shape:rtsPadDraft.shape || 'Moon Rise',
@@ -370,13 +437,14 @@ const FabricPrep = ({onGoto, initialFabricId}) => {
       price:rtsPadDraft.price || '$8.00',
       details:rtsPadDraft.details || '',
       available:rtsPadDraft.available !== false,
-      padPhotoUrl:rtsPadDraft.padPhoto || '',
+      padPhotoUrl:await shrinkForList(rtsPadDraft.padPhoto || ''),
       createdAt:new Date().toISOString(),
     };
     let listings = [];
     try { listings = JSON.parse(localStorage.getItem('wp_rts_listings') || '[]'); } catch (_) {}
     if (!Array.isArray(listings)) listings = [];
-    localStorage.setItem('wp_rts_listings', JSON.stringify([listing, ...listings]));
+    try { localStorage.setItem('wp_rts_listings', JSON.stringify([listing, ...listings])); }
+    catch (_) { setFabricEditorNotice('Could not save this RTS pad \u2014 this device\u2019s storage is full. Remove an older RTS listing or some saved photos, then try again.'); return; }
     window.dispatchEvent(new CustomEvent('wp-rts-listings-updated'));
     setFabricEditorNotice('RTS pad created — saved with this fabric and visible in Overview');
     window.setTimeout(closeFabricEditor, 700);

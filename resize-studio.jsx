@@ -203,47 +203,24 @@
   const baseName = (name) => String(name || 'photo').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'photo';
 
   // ---- Saved Gallery ----
-  // Puts a finished picture into the same Saved Gallery that Production uses (browser storage).
-  // Storage is small, so the gallery copy is limited to 1400 px on the long side; the Download
-  // buttons still give the full-size file. See-through pieces stay PNG, everything else is JPG.
-  const blobToImage = (blob) => new Promise((res, rej) => {
-    const url = URL.createObjectURL(blob);
-    const im = new Image();
-    im.onload = () => { URL.revokeObjectURL(url); res(im); };
-    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read the image.')); };
-    im.src = url;
-  });
-  async function galleryDataUrl(blob, keepAlpha) {
-    const im = await blobToImage(blob);
-    const k = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight));
-    const w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
-    if (!keepAlpha) { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h); }
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(im, 0, 0, w, h);
-    return { src: keepAlpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.9), ext: keepAlpha ? 'png' : 'jpg', w, h };
-  }
-  // shots: [{ key, name, label, blob, keepAlpha }]  -> returns how many were saved
+  // Puts a finished picture into the same Saved Gallery that Production uses. The full-size picture is
+  // kept in the browser's photo storage; the gallery list only holds a small preview of it.
+  // shots: [{ key, name, label, blob }]  -> returns how many were saved
   async function saveToGallery(shots) {
-    let list = [];
-    try { const v = JSON.parse(localStorage.getItem('wp_saved_shots') || '[]'); if (Array.isArray(v)) list = v; } catch (_) {}
-    let saved = 0;
     const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    let saved = 0;
     for (const sh of shots) {
-      const g = await galleryDataUrl(sh.blob, sh.keepAlpha);
-      const entry = {
+      const im = await createImageBitmap(sh.blob).catch(() => null);
+      const dims = im ? `${im.width}×${im.height}` : '';
+      if (im && im.close) im.close();
+      const ext = sh.blob.type === 'image/png' ? 'png' : sh.blob.type === 'image/webp' ? 'webp' : 'jpg';
+      await window.WPGallery.save({
         key: sh.key, source: 'resize', itemId: sh.key, itemName: sh.name, resultIndex: 0,
-        backdropId: 'resize', backdropName: sh.label, ratio: `${g.w}×${g.h}`,
-        fileName: `${baseName(sh.name)}-resize.${g.ext}`, src: g.src, savedAt: time,
-      };
-      const next = [...list.filter((x) => x.key !== sh.key), entry];
-      try { localStorage.setItem('wp_saved_shots', JSON.stringify(next)); }
-      catch (_) { if (saved) window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated')); throw new Error('The Saved Gallery is full on this device. Remove a few saved photos there, then try again.'); }
-      list = next; saved += 1;
+        backdropId: 'resize', backdropName: sh.label, ratio: dims,
+        fileName: `${baseName(sh.name)}-resize.${ext}`, savedAt: time,
+      }, sh.blob);
+      saved += 1;
     }
-    window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
     return saved;
   }
 
@@ -600,7 +577,7 @@
     const saveCollageToGallery = async () => {
       if (!blobRef.current) return;
       try {
-        await saveToGallery([{ key: `resize-collage:${Date.now()}`, name: 'Resize collage', label: 'Collage', blob: blobRef.current, keepAlpha: false }]);
+        await saveToGallery([{ key: `resize-collage:${Date.now()}`, name: 'Resize collage', label: 'Collage', blob: blobRef.current }]);
         setNotice({ text: 'Collage saved to your Saved Gallery.', err: false });
       } catch (e) { setNotice({ text: e.message || 'Could not save to the gallery.', err: true }); }
     };
@@ -981,8 +958,8 @@
     };
 
     const galleryEntry = async (it) => {
-      const { blob } = await renderToBlob(it, 'png', 1);
-      return { key: `resize:${it.id}:${it.ratioId || ""}:${it.quarterCorner || ""}`, name: it.name, label: isShaped(it) ? 'Resize · see-through' : 'Resize', blob, keepAlpha: isShaped(it) };
+      const { blob } = await renderToBlob(it, isShaped(it) ? 'png' : 'jpeg', 0.95);
+      return { key: `resize:${it.id}:${it.ratioId || ""}:${it.quarterCorner || ""}`, name: it.name, label: isShaped(it) ? 'Resize · see-through' : 'Resize', blob };
     };
     const saveActiveToGallery = async () => {
       if (!active || busy) return;

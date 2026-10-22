@@ -1,13 +1,11 @@
 // App shell — sidebar + topbar + route switcher
+// The Saved Gallery list comes from the shared store (gallery-store.js): small cards here, full pictures in IndexedDB.
 const readSavedShots = () => {
+  try { if (window.WPGallery) return window.WPGallery.list(); } catch (_) {}
   try {
     const value = JSON.parse(localStorage.getItem('wp_saved_shots') || '[]');
     return Array.isArray(value) ? value : [];
   } catch (_) { return []; }
-};
-
-const writeSavedShots = (shots) => {
-  try { localStorage.setItem('wp_saved_shots', JSON.stringify(shots)); } catch (_) {}
 };
 const readOverviewStore = (key, fallback) => {
   try {
@@ -21,16 +19,71 @@ const overviewDate = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString([], {month:'short', day:'numeric'});
 };
 
+const greetingFor = (hour) => hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+// Live counts for the sidebar card (photos saved, fabrics, RTS pads) — refreshed whenever any screen saves something.
+const useStudioCounts = () => {
+  const read = () => {
+    const fabrics = readOverviewStore('wp_prepared_fabrics', []);
+    const listings = readOverviewStore('wp_rts_listings', []);
+    return { shots: readSavedShots().length, fabrics: Array.isArray(fabrics) ? fabrics.length : 0, listings: Array.isArray(listings) ? listings.length : 0 };
+  };
+  const [counts, setCounts] = React.useState(read);
+  React.useEffect(() => {
+    const refresh = () => setCounts(read());
+    const names = ['wp-saved-gallery-updated','wp-fabrics-updated','wp-rts-listings-updated','wp-overview-updated','storage'];
+    names.forEach(n => window.addEventListener(n, refresh));
+    return () => names.forEach(n => window.removeEventListener(n, refresh));
+  }, []);
+  return counts;
+};
+
+// Top search: presets, saved photos, fabrics and RTS pads. Picking a result opens the right screen.
+const GlobalSearch = ({onGoto}) => {
+  const [q, setQ] = React.useState('');
+  const [open, setOpen] = React.useState(false);
+  const boxRef = React.useRef(null);
+  React.useEffect(() => {
+    const away = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, []);
+  const term = q.trim().toLowerCase();
+  const results = React.useMemo(() => {
+    if (!term) return [];
+    const has = (...vals) => vals.some(v => String(v || '').toLowerCase().includes(term));
+    const out = [];
+    try { (window.readStudioPresets ? window.readStudioPresets() : []).forEach(p => { if (has(p.name, p.description, p.id)) out.push({key:'p'+p.id, kind:'Preset', title:p.name, detail:'Open in Production', go:()=>onGoto('generator', p.id)}); }); } catch (_) {}
+    readSavedShots().forEach(sh => { if (has(sh.itemName, sh.backdropName, sh.fileName)) out.push({key:'s'+sh.key, kind:'Saved photo', title:sh.itemName || sh.fileName || 'Photo', detail:sh.backdropName || 'Saved Gallery', go:()=>onGoto('gallery')}); });
+    const fabrics = readOverviewStore('wp_prepared_fabrics', []);
+    (Array.isArray(fabrics) ? fabrics : []).forEach(f => { if (has(f.name, f.fileName, f.material, f.tags, f.category)) out.push({key:'f'+f.id, kind:'Fabric', title:f.name || f.fileName || 'Fabric', detail:f.material || 'Compress', go:()=>onGoto('fabric-prep', null, f.id)}); });
+    const listings = readOverviewStore('wp_rts_listings', []);
+    (Array.isArray(listings) ? listings : []).forEach(l => { if (has(l.title, l.fabricName, l.shape, l.padType, l.details)) out.push({key:'r'+l.id, kind:'RTS pad', title:l.title || l.fabricName || 'RTS pad', detail:l.fabricName || 'Ready-to-ship', go:()=>onGoto('fabric-prep', null, l.fabricId)}); });
+    return out.slice(0, 8);
+  }, [term, open]);
+  const pick = (r) => { setOpen(false); setQ(''); r.go(); };
+  return <div className="search wp-search" ref={boxRef}>
+    <Icon name="search" className="ico-sm" style={{color:'var(--muted)'}}/>
+    <input value={q} placeholder="Search presets, photos, fabrics…" aria-label="Search the studio"
+      onChange={e=>{setQ(e.target.value); setOpen(true);}} onFocus={()=>setOpen(true)}
+      onKeyDown={e=>{ if(e.key==='Escape'){setOpen(false); e.currentTarget.blur();} if(e.key==='Enter'&&results[0]) pick(results[0]); }}/>
+    {open && term && <div className="wp-search-pop" role="listbox">
+      {results.length ? results.map(r => <button type="button" key={r.key} className="wp-search-row" onClick={()=>pick(r)}><span className="wp-search-kind">{r.kind}</span><span className="wp-search-title">{r.title}</span><span className="wp-search-detail">{r.detail}</span></button>)
+        : <div className="wp-search-empty">Nothing found for “{q.trim()}”.</div>}
+    </div>}
+  </div>;
+};
+
 const Overview = ({onGoto}) => {
   const [data, setData] = React.useState(() => ({
     fabrics:readOverviewStore('wp_prepared_fabrics', []),
-    shots:readOverviewStore('wp_saved_shots', []),
+    shots:readSavedShots(),
     listings:readOverviewStore('wp_rts_listings', []),
     production:readOverviewStore('wp_production_summary', {total:0,cutoutsDone:0,processing:0,errored:0,withResults:0}),
   }));
   const refresh = React.useCallback(() => setData({
     fabrics:readOverviewStore('wp_prepared_fabrics', []),
-    shots:readOverviewStore('wp_saved_shots', []),
+    shots:readSavedShots(),
     listings:readOverviewStore('wp_rts_listings', []),
     production:readOverviewStore('wp_production_summary', {total:0,cutoutsDone:0,processing:0,errored:0,withResults:0}),
   }), []);
@@ -59,7 +112,7 @@ const Overview = ({onGoto}) => {
 
   return <div className="overview-page">
     <div className="page-heading overview-heading">
-      <div><div className="eyebrow"><Icon name="home" className="ico-sm"/> Studio · Overview</div><h1 className="serif">Good morning, Nilam.</h1><p className="muted">A live view of what is ready, what needs attention, and where to continue your Wonder Pads workflow.</p></div>
+      <div><div className="eyebrow"><Icon name="home" className="ico-sm"/> Studio · Overview</div><h1 className="serif">{greetingFor(new Date().getHours())}, Nilam.</h1><p className="muted">A live view of what is ready, what needs attention, and where to continue your Wonder Pads workflow.</p></div>
       <div className="row overview-actions"><button type="button" className="btn btn-blush" onClick={()=>onGoto('generator')}><Icon name="sparkles" className="ico-sm"/> Add product photos</button><button type="button" className="btn btn-ghost" onClick={()=>onGoto('fabric-prep')}><Icon name="scissors" className="ico-sm"/> Compress & Rename</button></div>
     </div>
 
@@ -123,11 +176,10 @@ const SavedGallery = ({onGoto}) => {
   }, []);
 
   const downloadShot = async (shot) => {
-    if (!shot?.src) return;
+    if (!shot) return;
     const filename = shot.fileName || 'wonder-pads-studio-shot.png';
     try {
-      const response = await fetch(shot.src);
-      const blob = await response.blob();
+      const blob = await window.WPGallery.fullBlob(shot);
       const file = new File([blob], filename, {type:blob.type || 'image/png'});
       if (navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
         await navigator.share({files:[file], title:'Wonder Pads Studio', text:'Saved from Wonder Pads Studio'});
@@ -145,18 +197,14 @@ const SavedGallery = ({onGoto}) => {
       try { window.open(shot.src, '_blank', 'noopener,noreferrer'); } catch (error) {}
     }
   };
+  const [galleryNote, setGalleryNote] = React.useState('');
 
-  const removeShot = (key) => {
-    const next = shots.filter(shot => shot.key !== key);
-    setShots(next);
-    writeSavedShots(next);
-    window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
+  const removeShot = async (key) => {
+    try { await window.WPGallery.remove(key); } catch (e) { setGalleryNote(e.message || 'Could not remove this picture.'); }
   };
 
-  const clearAll = () => {
-    setShots([]);
-    writeSavedShots([]);
-    window.dispatchEvent(new CustomEvent('wp-saved-gallery-updated'));
+  const clearAll = async () => {
+    try { await window.WPGallery.clear(); } catch (e) { setGalleryNote(e.message || 'Could not clear the gallery.'); }
   };
 
   return <><div className="saved-gallery-page">
@@ -181,6 +229,7 @@ const SavedGallery = ({onGoto}) => {
         </div>
         <span className="pill pill-sage"><Icon name="check" className="ico-sm"/> {shots.length} saved</span>
       </div>
+      {galleryNote && <div role="status" style={{margin:'0 0 12px', padding:'10px 14px', borderRadius:12, background:'var(--blush-soft)', border:'1px solid rgba(196,122,184,.3)', fontSize:12.5}}>{galleryNote}</div>}
       {!shots.length ? <div className="saved-gallery-empty">
         <Icon name="photo" className="ico-lg"/>
         <div className="serif" style={{fontSize:20}}>Nothing saved yet</div>
@@ -210,6 +259,14 @@ const App = () => {
   const [handoffPresetId, setHandoffPresetId] = React.useState(null);
   const [handoffFabricId, setHandoffFabricId] = React.useState(null);
   const [handoffSilhouette, setHandoffSilhouette] = React.useState(null);
+  const counts = useStudioCounts();
+  const [storageWarning, setStorageWarning] = React.useState('');
+  const [moreOpen, setMoreOpen] = React.useState(false);
+  React.useEffect(() => {
+    const on = (e) => setStorageWarning(String(e.detail || 'Storage on this device is full.'));
+    window.addEventListener('wp-storage-warning', on);
+    return () => window.removeEventListener('wp-storage-warning', on);
+  }, []);
   const [canInstall, setCanInstall] = React.useState(!!window.__deferredInstallPrompt);
   const [installed, setInstalled] = React.useState(window.matchMedia('(display-mode: standalone)').matches);
 
@@ -241,6 +298,7 @@ const App = () => {
     setHandoffFabricId(fabricId || null);
     setHandoffSilhouette(silhouetteItem || null);
     setScreen(s);
+    setMoreOpen(false);
     window.scrollTo({top:0, behavior:'smooth'});
   };
 
@@ -278,7 +336,7 @@ const App = () => {
         </div>
 
         {nav.map(grp => (
-          <div key={grp.grp}>
+          <div key={grp.grp} className="wp-nav-group">
             <div className="nav-group-title">{grp.grp}</div>
             {grp.items.map(item => (
               <div key={item.id}
@@ -292,12 +350,10 @@ const App = () => {
           </div>
         ))}
 
-        <div className="side-footer">
-          <div className="t">Aug production budget</div>
-          <div style={{opacity:.85, fontSize:11.5}}>1,284 / 2,000 shots</div>
-          <div style={{height:6, background:'rgba(255,255,255,.3)', borderRadius:999, marginTop:8, overflow:'hidden'}}>
-            <div style={{width:'64%', height:'100%', background:'#fff', borderRadius:999}}/>
-          </div>
+        <div className="side-footer" role="button" tabIndex={0} style={{cursor:'pointer'}} onClick={()=>goto('gallery')} onKeyDown={e=>{if(e.key==='Enter')goto('gallery');}}>
+          <div className="t">Your studio so far</div>
+          <div style={{opacity:.9, fontSize:12}}>{counts.shots} photo{counts.shots===1?'':'s'} saved</div>
+          <div style={{opacity:.85, fontSize:11.5}}>{counts.fabrics} fabric{counts.fabrics===1?'':'s'} · {counts.listings} RTS pad{counts.listings===1?'':'s'}</div>
         </div>
       </aside>
 
@@ -309,10 +365,7 @@ const App = () => {
             <span className="now">{screenLabel}</span>
           </div>
           <div className="top-actions">
-            <div className="search">
-              <Icon name="search" className="ico-sm" style={{color:'var(--muted)'}}/>
-              <input placeholder="Search presets, shots, tags…"/>
-            </div>
+            <GlobalSearch onGoto={goto}/>
             {canInstall && (
               <button className="btn btn-blush" style={{padding:'8px 14px', fontSize:12.5}} onClick={promptInstall} title="Install this app on your device">
                 <Icon name="download" className="ico-sm"/> Install app
@@ -321,15 +374,11 @@ const App = () => {
             {installed && !canInstall && (
               <span className="pill pill-sage" title="Running as installed app"><Icon name="check" className="ico-sm"/> Installed</span>
             )}
-            <button className="icon-btn" title="Notifications">
-              <Icon name="bell" className="ico-sm"/>
-              <span style={{position:'absolute', top:6, right:7, width:7, height:7, borderRadius:'50%', background:'var(--rose)'}}/>
-            </button>
-            <button className="icon-btn" title="Help"><Icon name="settings" className="ico-sm"/></button>
-            <div className="avatar" title="Nilam">SP</div>
+            <div className="avatar" title="Nilam">N</div>
           </div>
         </div>
 
+        {storageWarning && <div className="wp-storage-banner" role="alert"><span>{storageWarning}</span><button type="button" onClick={()=>setStorageWarning('')} aria-label="Dismiss">×</button></div>}
         {screen==='home'     && <Overview onGoto={goto}/>} 
         {screen==='builder'   && <PresetBuilder   onGoto={goto}/>} 
         {screen==='generator' && <ProductionGenerator initialPresetId={handoffPresetId} onGoto={goto}/>} 
@@ -338,6 +387,19 @@ const App = () => {
         {screen==='resize' && window.ResizeStudioPage && React.createElement(window.ResizeStudioPage)} 
         {screen==='gallery' && <SavedGallery onGoto={goto}/>} 
       </main>
+
+      <nav className="wp-tabbar" aria-label="Main menu">
+        {[['home','Home','home'],['gallery','Gallery','photo'],['generator','Production','sparkles'],['fabric-prep','Compress','scissors']].map(([id,label,icon]) =>
+          <button type="button" key={id} className={screen===id?'active':''} onClick={()=>goto(id)}><Icon name={icon} className="ico"/><span>{label}</span></button>)}
+        <button type="button" className={['builder','resize','silhouette'].includes(screen)||moreOpen?'active':''} onClick={()=>setMoreOpen(o=>!o)} aria-expanded={moreOpen}><Icon name="grid" className="ico"/><span>More</span></button>
+      </nav>
+      {moreOpen && <div className="wp-more-back" onClick={()=>setMoreOpen(false)}>
+        <div className="wp-more-sheet" onClick={e=>e.stopPropagation()} role="menu">
+          {[['builder','Presets','template'],['resize','Resize Studio','layout'],['silhouette','Silhouette Studio','scissors']].map(([id,label,icon]) =>
+            <button type="button" key={id} className={screen===id?'active':''} onClick={()=>goto(id)}><Icon name={icon} className="ico"/><span>{label}</span></button>)}
+          {canInstall && <button type="button" onClick={()=>{setMoreOpen(false);promptInstall();}}><Icon name="download" className="ico"/><span>Install app</span></button>}
+        </div>
+      </div>}
     </div>
   );
 };

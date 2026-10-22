@@ -1,14 +1,14 @@
 // Wonder Pads Studio — Service Worker
 // v73 focused canvas editor. Network-first for app assets keeps previews and
 // deployments current, while cached files provide an offline fallback.
-const VERSION = 'wp-studio-v110-point-toolbar';
+const VERSION = 'wp-studio-v114-nav';
 const APP_SHELL_CACHE = `app-shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 const APP_SHELL = [
   './', './index.html', './manifest.webmanifest',
   './icons.jsx', './data.jsx', './backdrops.jsx', './preset-builder.jsx',
   './production.jsx', './fabric-prep.jsx', './app.jsx', './bg-removal.js',
-  './gemini.js', './proxy-config.js', './bg-worker.js', './cutout-editor.jsx',
+  './gemini.js', './gallery-store.js', './proxy-config.js', './bg-worker.js', './cutout-editor.jsx',
   './resize-studio.jsx', './silhouette-studio.jsx', './silhouette-engine.js', './silhouette-studio.css', './assets/pdf.min.js', './assets/pdf.worker.min.js',
   './assets/icon-192.png', './assets/icon-512.png', './assets/brand-reference.png',
   './assets/preset-sewing.jpg', './assets/preset-blush.jpg', './assets/preset-cozy.jpg',
